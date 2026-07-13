@@ -112,14 +112,16 @@ export default function PostCard({
 
         <div className="pc-spacer" />
 
-        <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)}>
-          {editing ? 'Done' : 'Edit'}
-        </button>
-        <button className="btn btn-subtle btn-sm" onClick={() => copy()}>Copy</button>
-        <button className="btn btn-primary btn-sm" onClick={publish} disabled={!isApproved} title={isApproved ? 'Copy & open compose page' : 'Approve first'}>
-          Publish
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
-        </button>
+        <div className="pc-action-btns">
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)}>
+            {editing ? 'Done' : 'Edit'}
+          </button>
+          <button className="btn btn-subtle btn-sm" onClick={() => copy()}>Copy</button>
+          <button className="btn btn-primary btn-sm" onClick={publish} disabled={!isApproved} title={isApproved ? 'Copy & open compose page' : 'Approve first'}>
+            Publish
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
+          </button>
+        </div>
       </div>
 
       <style>{`
@@ -154,6 +156,14 @@ export default function PostCard({
         .pc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .pc-approve svg { margin-right: 2px; }
         .pc-spacer { flex: 1; min-width: 8px; }
+        /* Keep Edit/Copy/Publish together so Publish never wraps alone. */
+        .pc-action-btns { display: flex; align-items: center; gap: 8px; }
+        @media (max-width: 460px) {
+          .pc-actions { row-gap: 10px; }
+          .pc-spacer { display: none; }
+          .pc-approve { order: -1; }
+          .pc-action-btns { flex: 1; justify-content: flex-end; }
+        }
       `}</style>
     </div>
   )
