@@ -31,6 +31,9 @@ function devApi(env) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
+    // Relative base so the built assets work under any path — root on Vercel,
+    // or a project sub-path like /sidekick/ on GitHub Pages.
+    base: './',
     plugins: [react(), devApi(env)],
     server: { port: 5173 },
   }

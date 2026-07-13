@@ -3,7 +3,7 @@
 // fields, so the full flow is demonstrable offline. Responses carry demo:true
 // and the UI badges every card as sample copy — never passed off as live output.
 
-import { PLATFORM_MAP } from '../../shared/constants.js'
+import { PLATFORM_MAP } from './constants.js'
 
 function money(listing) {
   if (listing.price == null) return listing.listingType === 'rental' ? 'Price on ask' : 'Price on ask'

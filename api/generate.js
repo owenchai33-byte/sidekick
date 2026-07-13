@@ -6,7 +6,7 @@
 
 import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
-import { demoContent, demoParse } from './_lib/demoContent.js'
+import { demoContent, demoParse } from '../shared/demo.js'
 
 function send(res, status, payload) {
   res.statusCode = status
