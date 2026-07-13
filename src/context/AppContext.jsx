@@ -5,6 +5,7 @@ const AppContext = createContext(null)
 
 export function AppProvider({ children }) {
   const [listings, setListings] = useState([])
+  const [leads, setLeads] = useState([])
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toasts, setToasts] = useState([])
@@ -12,9 +13,10 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     let alive = true
-    Promise.all([store.listListings(), store.getSettings()]).then(([ls, s]) => {
+    Promise.all([store.listListings(), store.listLeads(), store.getSettings()]).then(([ls, lds, s]) => {
       if (!alive) return
       setListings(ls)
+      setLeads(lds)
       setSettings(s)
       setLoading(false)
     })
@@ -44,6 +46,17 @@ export function AppProvider({ children }) {
     setListings(await store.listListings())
   }, [])
 
+  const saveLead = useCallback(async (lead) => {
+    const saved = await store.upsertLead(lead)
+    setLeads(await store.listLeads())
+    return saved
+  }, [])
+
+  const removeLead = useCallback(async (id) => {
+    await store.deleteLead(id)
+    setLeads(await store.listLeads())
+  }, [])
+
   const updateSettings = useCallback(async (next) => {
     const merged = { ...settings, ...next, rules: { ...settings.rules, ...(next.rules || {}) } }
     await store.saveSettings(merged)
@@ -52,8 +65,8 @@ export function AppProvider({ children }) {
   }, [settings])
 
   const value = {
-    listings, settings, loading, toasts, toast,
-    refresh, saveListing, removeListing, updateSettings,
+    listings, leads, settings, loading, toasts, toast,
+    refresh, saveListing, removeListing, saveLead, removeLead, updateSettings,
     newId: store.newId,
   }
 

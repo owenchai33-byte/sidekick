@@ -71,6 +71,33 @@ export async function deleteListing(id) {
   write({ listings })
 }
 
+// ── Leads (Phase 2: lead tracking + attribution) ─────────
+export async function listLeads() {
+  const { leads = {} } = read()
+  return Object.values(leads).sort(
+    (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt),
+  )
+}
+
+export async function upsertLead(lead) {
+  const { leads = {} } = read()
+  const now = new Date().toISOString()
+  const saved = {
+    ...lead,
+    createdAt: lead.createdAt || now,
+    updatedAt: now,
+  }
+  leads[saved.id] = saved
+  write({ leads })
+  return saved
+}
+
+export async function deleteLead(id) {
+  const { leads = {} } = read()
+  delete leads[id]
+  write({ leads })
+}
+
 // ── Settings ─────────────────────────────────────────────
 export async function getSettings() {
   const { settings } = read()

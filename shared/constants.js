@@ -108,3 +108,19 @@ export const KUCHING_AREAS = [
   'Matang', 'Petra Jaya', 'Samarahan', 'Jalan Song', 'Green Heights',
   'BDC', 'Stampin', 'Pending', 'Demak Laut', 'Kenyalang',
 ]
+
+/**
+ * Lead pipeline stages (§6). A lead is "system-sourced" because it's logged
+ * against a listing + the platform it came in on — that attribution is the
+ * basis for the referral share. Trust-based: the system tracks what agents log.
+ */
+export const LEAD_STAGES = [
+  { id: 'new', name: 'New', open: true, tone: 'neutral' },
+  { id: 'contacted', name: 'Contacted', open: true, tone: 'info' },
+  { id: 'viewing', name: 'Viewing', open: true, tone: 'info' },
+  { id: 'negotiating', name: 'Negotiating', open: true, tone: 'warn' },
+  { id: 'won', name: 'Closed — Won', open: false, tone: 'win' },
+  { id: 'lost', name: 'Closed — Lost', open: false, tone: 'lost' },
+]
+
+export const LEAD_STAGE_MAP = Object.fromEntries(LEAD_STAGES.map((s) => [s.id, s]))
