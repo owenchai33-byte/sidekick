@@ -212,6 +212,7 @@ export default function ListingDetailPage() {
               <PostCard
                 key={pid}
                 platform={platform}
+                listing={listing}
                 languages={listing.languages}
                 content={listing.content[pid] || {}}
                 approvals={listing.approvals?.[pid] || {}}

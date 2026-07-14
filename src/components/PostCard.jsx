@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { LANGUAGE_MAP } from '../../shared/constants.js'
+import PostPreview from './PostPreview.jsx'
 
-// The signature element: one listing shown per platform, tabbed across
-// EN / 中文 / BM. Inline edit, approve-per-language, and one-tap publish
-// (copy to clipboard + open the platform's compose page). Nothing publishes
-// without approval.
+// One listing shown per platform, tabbed across EN / 中文 / BM. Two views:
+// a visual Preview (how the post really looks) and Text (edit inline). Approve
+// per language, then one-tap publish = copy the caption + download the photos +
+// open the platform's compose page. Nothing publishes without approval.
 export default function PostCard({
   platform,
+  listing,
   languages,
   content = {},
   approvals = {},
@@ -18,33 +20,54 @@ export default function PostCard({
   toast,
 }) {
   const [active, setActive] = useState(languages[0] || 'en')
-  const [editing, setEditing] = useState(false)
+  const [view, setView] = useState('preview') // 'preview' | 'text'
   const lang = languages.includes(active) ? active : languages[0]
   const text = content[lang] ?? ''
   const isApproved = !!approvals[lang]
   const publishedAt = published[lang]
   const neverAuto = platform.autopost === 'never'
+  const photos = listing?.photos || []
 
-  async function copy(showToast = true) {
+  async function copyCaption() {
     try {
       await navigator.clipboard.writeText(text)
-      if (showToast) toast?.('Copied to clipboard', 'success')
-      return true
+      toast?.('Caption copied', 'success')
     } catch {
       toast?.('Could not access clipboard', 'danger')
-      return false
     }
   }
 
-  async function publish() {
+  function downloadPhotos() {
+    photos.forEach((src, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a')
+        a.href = src
+        a.download = `${(listing?.title || listing?.location || 'listing').replace(/[^\w]+/g, '-').toLowerCase()}-${i + 1}.jpg`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }, i * 200)
+    })
+    return photos.length
+  }
+
+  // Synchronous (no await before window.open) so the browser keeps it inside the
+  // user gesture and doesn't block the popup or the downloads.
+  function publish() {
     if (!isApproved) {
       toast?.('Approve this post before publishing', 'warn')
       return
     }
-    await copy(false)
+    try { navigator.clipboard.writeText(text) } catch { /* non-fatal */ }
+    const n = downloadPhotos()
     window.open(platform.compose, '_blank', 'noopener')
     onPublish?.(lang)
-    toast?.(`Copied — ${platform.name} opened. Paste & post.`, 'success')
+    toast?.(
+      n > 0
+        ? `Caption copied · ${n} photo${n > 1 ? 's' : ''} downloaded — paste & attach`
+        : `Caption copied — ${platform.name} opened. Paste & post.`,
+      'success',
+    )
   }
 
   return (
@@ -70,32 +93,38 @@ export default function PostCard({
         </div>
       )}
 
-      <div className="pc-tabs" role="tablist" aria-label={`${platform.name} languages`}>
-        {languages.map((lid) => (
-          <button
-            key={lid}
-            role="tab"
-            aria-selected={lid === lang}
-            className={`pc-tab ${lid === lang ? 'on' : ''}`}
-            onClick={() => { setActive(lid); setEditing(false) }}
-          >
-            {LANGUAGE_MAP[lid]?.label}
-            {approvals[lid] && <span className="pc-tab-dot" aria-hidden="true" />}
-          </button>
-        ))}
+      <div className="pc-controls">
+        <div className="pc-tabs" role="tablist" aria-label={`${platform.name} languages`}>
+          {languages.map((lid) => (
+            <button
+              key={lid}
+              role="tab"
+              aria-selected={lid === lang}
+              className={`pc-tab ${lid === lang ? 'on' : ''}`}
+              onClick={() => setActive(lid)}
+            >
+              {LANGUAGE_MAP[lid]?.label}
+              {approvals[lid] && <span className="pc-tab-dot" aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+        <div className="pc-view" role="tablist" aria-label="View">
+          <button className={`pc-view-btn ${view === 'preview' ? 'on' : ''}`} aria-selected={view === 'preview'} onClick={() => setView('preview')}>Preview</button>
+          <button className={`pc-view-btn ${view === 'text' ? 'on' : ''}`} aria-selected={view === 'text'} onClick={() => setView('text')}>Text</button>
+        </div>
       </div>
 
-      <div className="pc-body">
-        {editing ? (
+      <div className={`pc-body ${view === 'preview' ? 'pc-body-preview' : ''}`}>
+        {view === 'preview' ? (
+          <PostPreview platform={platform} listing={listing || {}} text={text} />
+        ) : (
           <textarea
             className="textarea pc-textarea"
             value={text}
             rows={Math.min(16, Math.max(6, text.split('\n').length + 1))}
             onChange={(e) => onEditText?.(lang, e.target.value)}
-            autoFocus
+            placeholder="Copy will appear here…"
           />
-        ) : (
-          <pre className="pc-text">{text || <span className="muted">No copy yet.</span>}</pre>
         )}
       </div>
 
@@ -113,11 +142,8 @@ export default function PostCard({
         <div className="pc-spacer" />
 
         <div className="pc-action-btns">
-          <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)}>
-            {editing ? 'Done' : 'Edit'}
-          </button>
-          <button className="btn btn-subtle btn-sm" onClick={() => copy()}>Copy</button>
-          <button className="btn btn-primary btn-sm" onClick={publish} disabled={!isApproved} title={isApproved ? 'Copy & open compose page' : 'Approve first'}>
+          <button className="btn btn-subtle btn-sm" onClick={copyCaption}>Copy</button>
+          <button className="btn btn-primary btn-sm" onClick={publish} disabled={!isApproved} title={isApproved ? 'Copy caption, download photos & open compose page' : 'Approve first'}>
             Publish
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
           </button>
@@ -139,6 +165,7 @@ export default function PostCard({
           padding: 8px 11px; border-radius: var(--r-sm); }
         @media (prefers-color-scheme: dark) { .pc-guard { color: var(--timber-300); } }
 
+        .pc-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
         .pc-tabs { display: flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); width: fit-content; }
         .pc-tab { position: relative; border: none; background: transparent; padding: 7px 16px; border-radius: var(--r-sm);
           font-size: 13px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
@@ -147,16 +174,19 @@ export default function PostCard({
         @media (prefers-color-scheme: dark) { .pc-tab.on { color: var(--green-400); } }
         .pc-tab-dot { position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--green-500); }
 
+        .pc-view { display: flex; gap: 3px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); }
+        .pc-view-btn { border: none; background: transparent; padding: 7px 14px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
+        .pc-view-btn.on { background: var(--green-700); color: #fff; }
+        @media (prefers-color-scheme: dark) { .pc-view-btn.on { background: var(--green-500); color: #0f2e21; } }
+
         .pc-body { background: var(--surface-sunk); border: 1px solid var(--line); border-radius: var(--r-md); }
-        .pc-text { margin: 0; padding: 14px; font-family: inherit; font-size: 14px; line-height: 1.62;
-          white-space: pre-wrap; word-break: break-word; color: var(--ink-900); max-height: 420px; overflow: auto; }
+        .pc-body-preview { padding: 18px 12px; background: var(--surface-sunk); }
         .pc-textarea { border: none; background: transparent; padding: 14px; font-size: 14px; line-height: 1.62; }
         .pc-textarea:focus { box-shadow: none; }
 
         .pc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .pc-approve svg { margin-right: 2px; }
         .pc-spacer { flex: 1; min-width: 8px; }
-        /* Keep Edit/Copy/Publish together so Publish never wraps alone. */
         .pc-action-btns { display: flex; align-items: center; gap: 8px; }
         @media (max-width: 460px) {
           .pc-actions { row-gap: 10px; }
