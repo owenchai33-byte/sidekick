@@ -5,9 +5,14 @@ import { formatPrice, listingLabel } from '../lib/format.js'
 // archetypes cover the six platforms: Facebook feed, Instagram, TikTok video,
 // and a portal/listing card (Marketplace / Mudah / property portals).
 
-function PhotoBlock({ listing, ratio }) {
-  const src = listing.photos?.[0]
+function PhotoBlock({ listing, ratio, videoUrl, videoMode }) {
   const style = ratio ? { aspectRatio: ratio } : undefined
+  if (videoUrl) {
+    return videoMode === 'cover'
+      ? <video className="pv-photo" src={videoUrl} style={style} autoPlay muted loop playsInline />
+      : <video className="pv-photo" src={videoUrl} style={style} controls muted playsInline />
+  }
+  const src = listing.photos?.[0]
   if (src) return <img className="pv-photo" src={src} alt="" style={style} />
   const emoji = listing.listingType === 'rental' ? '🔑' : '🏠'
   return (
@@ -18,7 +23,7 @@ function PhotoBlock({ listing, ratio }) {
   )
 }
 
-function FacebookPost({ listing, text }) {
+function FacebookPost({ listing, text, videoUrl }) {
   return (
     <div className="pv pv-fb">
       <div className="pv-fb-head">
@@ -30,7 +35,7 @@ function FacebookPost({ listing, text }) {
         <div className="pv-more">⋯</div>
       </div>
       <pre className="pv-text">{text}</pre>
-      <PhotoBlock listing={listing} ratio="1.91 / 1" />
+      <PhotoBlock listing={listing} ratio="1.91 / 1" videoUrl={videoUrl} />
       <div className="pv-fb-actions">
         <span>👍 Like</span><span>💬 Comment</span><span>↗ Share</span>
       </div>
@@ -38,7 +43,7 @@ function FacebookPost({ listing, text }) {
   )
 }
 
-function InstagramPost({ listing, text }) {
+function InstagramPost({ listing, text, videoUrl }) {
   return (
     <div className="pv pv-ig">
       <div className="pv-ig-head">
@@ -46,7 +51,7 @@ function InstagramPost({ listing, text }) {
         <div className="pv-name">sidekick.property</div>
         <div className="pv-more">⋯</div>
       </div>
-      <PhotoBlock listing={listing} ratio="1 / 1" />
+      <PhotoBlock listing={listing} ratio="1 / 1" videoUrl={videoUrl} />
       <div className="pv-ig-actions">
         <span>♥</span><span>💬</span><span>➤</span><span className="pv-ig-save">🔖</span>
       </div>
@@ -56,10 +61,10 @@ function InstagramPost({ listing, text }) {
   )
 }
 
-function TikTokPost({ listing, text }) {
+function TikTokPost({ listing, text, videoUrl }) {
   return (
     <div className="pv pv-tt">
-      <PhotoBlock listing={listing} ratio="9 / 16" />
+      <PhotoBlock listing={listing} ratio="9 / 16" videoUrl={videoUrl} videoMode="cover" />
       <div className="pv-tt-shade" />
       <div className="pv-tt-rail">
         <span className="pv-tt-ava">🏡</span>
@@ -74,7 +79,7 @@ function TikTokPost({ listing, text }) {
   )
 }
 
-function ListingCard({ listing, text, platform }) {
+function ListingCard({ listing, text, platform, videoUrl }) {
   const specs = [
     listing.bedrooms != null && `🛏 ${listing.bedrooms}`,
     listing.bathrooms != null && `🛁 ${listing.bathrooms}`,
@@ -83,7 +88,7 @@ function ListingCard({ listing, text, platform }) {
   return (
     <div className="pv pv-listing">
       <div className="pv-listing-src">{platform.name}</div>
-      <PhotoBlock listing={listing} ratio="1.6 / 1" />
+      <PhotoBlock listing={listing} ratio="1.6 / 1" videoUrl={videoUrl} />
       <div className="pv-listing-body">
         <div className="pv-listing-price">{formatPrice(listing.price, listing.listingType)}</div>
         <div className="pv-listing-title">{listingLabel(listing)}</div>
@@ -95,13 +100,13 @@ function ListingCard({ listing, text, platform }) {
   )
 }
 
-export default function PostPreview({ platform, listing, text }) {
+export default function PostPreview({ platform, listing, text, videoUrl }) {
   const body = !text
     ? <div className="pv-empty">No copy yet.</div>
-    : platform.id === 'facebook_page' ? <FacebookPost listing={listing} text={text} />
-    : platform.id === 'instagram' ? <InstagramPost listing={listing} text={text} />
-    : platform.id === 'tiktok' ? <TikTokPost listing={listing} text={text} />
-    : <ListingCard listing={listing} text={text} platform={platform} />
+    : platform.id === 'facebook_page' ? <FacebookPost listing={listing} text={text} videoUrl={videoUrl} />
+    : platform.id === 'instagram' ? <InstagramPost listing={listing} text={text} videoUrl={videoUrl} />
+    : platform.id === 'tiktok' ? <TikTokPost listing={listing} text={text} videoUrl={videoUrl} />
+    : <ListingCard listing={listing} text={text} platform={platform} videoUrl={videoUrl} />
 
   return (
     <div className="pv-wrap">

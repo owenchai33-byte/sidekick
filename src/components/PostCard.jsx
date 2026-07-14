@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { LANGUAGE_MAP } from '../../shared/constants.js'
 import PostPreview from './PostPreview.jsx'
+import PublishSheet from './PublishSheet.jsx'
+import { useVideoUrls } from './MediaUploader.jsx'
+import { copyText } from '../lib/clipboard.js'
 
 // One listing shown per platform, tabbed across EN / 中文 / BM. Two views:
 // a visual Preview (how the post really looks) and Text (edit inline). Approve
@@ -21,53 +24,28 @@ export default function PostCard({
 }) {
   const [active, setActive] = useState(languages[0] || 'en')
   const [view, setView] = useState('preview') // 'preview' | 'text'
+  const [sheetOpen, setSheetOpen] = useState(false)
   const lang = languages.includes(active) ? active : languages[0]
   const text = content[lang] ?? ''
   const isApproved = !!approvals[lang]
   const publishedAt = published[lang]
   const neverAuto = platform.autopost === 'never'
   const photos = listing?.photos || []
+  const videos = listing?.videos || []
+  const videoUrls = useVideoUrls(videos)
+  const coverVideoUrl = videos[0] ? videoUrls[videos[0].id] : null
 
   async function copyCaption() {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast?.('Caption copied', 'success')
-    } catch {
-      toast?.('Could not access clipboard', 'danger')
-    }
+    const ok = await copyText(text)
+    toast?.(ok ? 'Caption copied' : 'Copy blocked — select & copy manually', ok ? 'success' : 'warn')
   }
 
-  function downloadPhotos() {
-    photos.forEach((src, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a')
-        a.href = src
-        a.download = `${(listing?.title || listing?.location || 'listing').replace(/[^\w]+/g, '-').toLowerCase()}-${i + 1}.jpg`
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-      }, i * 200)
-    })
-    return photos.length
-  }
-
-  // Synchronous (no await before window.open) so the browser keeps it inside the
-  // user gesture and doesn't block the popup or the downloads.
-  function publish() {
+  function openPublish() {
     if (!isApproved) {
       toast?.('Approve this post before publishing', 'warn')
       return
     }
-    try { navigator.clipboard.writeText(text) } catch { /* non-fatal */ }
-    const n = downloadPhotos()
-    window.open(platform.compose, '_blank', 'noopener')
-    onPublish?.(lang)
-    toast?.(
-      n > 0
-        ? `Caption copied · ${n} photo${n > 1 ? 's' : ''} downloaded — paste & attach`
-        : `Caption copied — ${platform.name} opened. Paste & post.`,
-      'success',
-    )
+    setSheetOpen(true)
   }
 
   return (
@@ -116,7 +94,7 @@ export default function PostCard({
 
       <div className={`pc-body ${view === 'preview' ? 'pc-body-preview' : ''}`}>
         {view === 'preview' ? (
-          <PostPreview platform={platform} listing={listing || {}} text={text} />
+          <PostPreview platform={platform} listing={listing || {}} text={text} videoUrl={coverVideoUrl} />
         ) : (
           <textarea
             className="textarea pc-textarea"
@@ -143,12 +121,27 @@ export default function PostCard({
 
         <div className="pc-action-btns">
           <button className="btn btn-subtle btn-sm" onClick={copyCaption}>Copy</button>
-          <button className="btn btn-primary btn-sm" onClick={publish} disabled={!isApproved} title={isApproved ? 'Copy caption, download photos & open compose page' : 'Approve first'}>
+          <button className="btn btn-primary btn-sm" onClick={openPublish} disabled={!isApproved} title={isApproved ? 'Open the step-by-step publish helper' : 'Approve first'}>
             Publish
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
           </button>
         </div>
       </div>
+
+      {sheetOpen && (
+        <PublishSheet
+          platform={platform}
+          listing={listing || {}}
+          lang={lang}
+          text={text}
+          photos={photos}
+          videos={videos}
+          videoUrls={videoUrls}
+          toast={toast}
+          onPublished={() => onPublish?.(lang)}
+          onClose={() => setSheetOpen(false)}
+        />
+      )}
 
       <style>{`
         .postcard { padding: 16px; display: flex; flex-direction: column; gap: 13px; }

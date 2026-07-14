@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext.jsx'
 import { parseListing } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { PROPERTY_TYPES, KUCHING_AREAS } from '../../shared/constants.js'
-import PhotoUploader from '../components/PhotoUploader.jsx'
+import MediaUploader from '../components/MediaUploader.jsx'
 import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
 
@@ -24,6 +24,7 @@ export default function NewListingPage() {
   const [parsing, setParsing] = useState(false)
   const [fields, setFields] = useState(EMPTY)
   const [photos, setPhotos] = useState([])
+  const [videos, setVideos] = useState([])
   const [platforms, setPlatforms] = useState(settings.defaultPlatforms)
   const [languages, setLanguages] = useState(settings.defaultLanguages)
   const [saving, setSaving] = useState(false)
@@ -84,6 +85,7 @@ export default function NewListingPage() {
         title: fields.title.trim() || null,
         rawInput: raw.trim() || null,
         photos,
+        videos,
         platforms,
         languages,
         content: {},
@@ -200,9 +202,9 @@ export default function NewListingPage() {
           </section>
 
           <section className="card block">
-            <h2 className="block-title">Photos</h2>
-            <p className="muted block-sub">Carried through to every post. First photo is the cover.</p>
-            <PhotoUploader photos={photos} onChange={setPhotos} />
+            <h2 className="block-title">Photos & video</h2>
+            <p className="muted block-sub">Carried through to every post. A video is used for the Reels/TikTok preview.</p>
+            <MediaUploader photos={photos} videos={videos} onChangePhotos={setPhotos} onChangeVideos={setVideos} />
           </section>
 
           <section className="card block">
