@@ -191,16 +191,16 @@ export default function PipelinePage() {
       <p className="muted trust-note">The system tracks what agents log — it can't see deals closed offline. Clean logging in, clear attribution out.</p>
 
       <style>{`
-        .dash { display: flex; flex-direction: column; gap: 16px; }
-        .dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-        .dash-head h1 { font-size: 25px; }
-        .dash-head p { margin-top: 4px; font-size: 13px; max-width: 46ch; }
+        .dash { display: flex; flex-direction: column; gap: 24px; }
+        .dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-top: 4px; }
+        .dash-head h1 { font-size: 26px; letter-spacing: -0.02em; }
+        .dash-head p { margin-top: 5px; font-size: 13px; max-width: 46ch; }
 
-        .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+        .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
         @media (min-width: 560px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
         @media (min-width: 900px) { .tiles { grid-template-columns: repeat(6, 1fr); } }
-        .tile { position: relative; text-align: left; padding: 13px 13px 12px; border-radius: var(--r-md);
-          background: var(--surface); border: 1.5px solid var(--line); cursor: pointer;
+        .tile { position: relative; text-align: left; padding: 15px 14px; border-radius: var(--r-md);
+          background: var(--surface); border: 1px solid var(--line); cursor: pointer;
           display: flex; flex-direction: column; gap: 3px; transition: all 0.14s var(--ease); }
         .tile:hover:not(.tile-static) { border-color: var(--green-500); transform: translateY(-1px); }
         .tile-on { border-color: var(--green-600); background: var(--green-100); }
@@ -216,14 +216,13 @@ export default function PipelinePage() {
         .logform { padding: 16px; }
         .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
 
-        .dash-section-head { margin: 2px 0 2px; }
-        .dash-section-head h2 { font-size: 15px; }
-        .dash-section-head p { font-size: 12.5px; margin-top: 2px; }
+        .dash-section-head h2 { font-size: 16px; letter-spacing: -0.01em; }
+        .dash-section-head p { font-size: 12.5px; margin-top: 3px; }
 
-        .lead-list { display: grid; grid-template-columns: 1fr; gap: 9px; }
+        .lead-list { display: grid; grid-template-columns: 1fr; gap: 12px; }
         @media (min-width: 720px) { .lead-list { grid-template-columns: 1fr 1fr; } }
 
-        .rows { display: flex; flex-direction: column; gap: 8px; }
+        .rows { display: flex; flex-direction: column; gap: 10px; }
         .row-link { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-md);
           background: var(--surface); border: 1px solid var(--line); text-decoration: none; color: inherit; transition: all 0.14s var(--ease); }
         .row-link:hover { border-color: var(--line-strong); background: var(--surface-sunk); }
@@ -315,7 +314,7 @@ function LeadRow({ lead, listings, onStage, onDelete, onValue, showValue }) {
         </button>
       </div>
       <style>{`
-        .lc { padding: 12px 13px; display: flex; flex-direction: column; gap: 9px; }
+        .lc { padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; }
         .lc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .lc-name { font-size: 14.5px; }
         .lc-meta { font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

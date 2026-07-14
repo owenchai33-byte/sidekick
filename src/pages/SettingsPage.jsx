@@ -150,12 +150,13 @@ export default function SettingsPage() {
         .danger-ghost:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }`}</style>
 
       <style>{`
-        .settings { display: flex; flex-direction: column; gap: 16px; }
-        .page-head h1 { font-size: 24px; }
-        .block { padding: 16px; }
-        .block-title { font-size: 15px; }
-        .block-sub { font-size: 12.5px; margin: 3px 0 12px; }
-        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+        .settings { display: flex; flex-direction: column; gap: 22px; }
+        .page-head { padding-top: 4px; }
+        .page-head h1 { font-size: 26px; letter-spacing: -0.02em; }
+        .block { padding: 20px; }
+        .block-title { font-size: 16px; letter-spacing: -0.01em; }
+        .block-sub { font-size: 12.5px; margin: 4px 0 16px; max-width: 60ch; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
         .engine { display: flex; gap: 11px; align-items: flex-start; padding: 13px; border-radius: var(--r-md); }
         .engine-live { background: var(--green-100); }

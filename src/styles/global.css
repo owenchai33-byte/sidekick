@@ -65,9 +65,11 @@ a { color: var(--brand); }
 .input::placeholder, .textarea::placeholder { color: var(--ink-400); }
 
 /* ── Cards ───────────────────────────────────────────── */
+/* Flatter and quieter — a hairline border, no resting shadow, so the page
+   reads as calm surfaces rather than a stack of floating boxes. */
 .card {
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+  border-radius: var(--r-lg);
 }
 
 /* ── Chips ───────────────────────────────────────────── */
@@ -89,20 +91,22 @@ a { color: var(--brand); }
 }
 
 /* ── Badges ──────────────────────────────────────────── */
+/* Calm, soft-tint system — no loud solid fills, so nothing shouts. */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
-  letter-spacing: 0.02em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
 }
-.badge-demo { background: #fbe6c8; color: #7a5a12; }
-.badge-flag { background: var(--timber-500); color: #fff; }
+.badge-demo { background: color-mix(in srgb, var(--warn) 16%, transparent); color: #8a6516; }
+.badge-flag { background: color-mix(in srgb, var(--timber-500) 16%, transparent); color: var(--timber-700); }
 .badge-live { background: var(--green-100); color: var(--green-700); }
 .badge-neutral { background: var(--surface-sunk); color: var(--ink-500); }
-.badge-approved { background: var(--green-600); color: #fff; }
-.badge-example { background: transparent; color: var(--ink-500); border: 1px dashed var(--line-strong); }
+.badge-approved { background: var(--green-100); color: var(--green-700); }
+.badge-example { background: transparent; color: var(--ink-400); border: 1px dashed var(--line-strong); }
 @media (prefers-color-scheme: dark) {
-  .badge-demo { background: #4a3a12; color: #f0d69a; }
-  .badge-live { color: var(--green-400); }
+  .badge-demo { color: #f0d69a; }
+  .badge-flag { color: var(--timber-300); }
+  .badge-live, .badge-approved { color: var(--green-400); }
 }
 
 /* ── Utility ─────────────────────────────────────────── */

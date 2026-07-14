@@ -79,7 +79,7 @@ export default function AppShell({ children }) {
         .topnav-link.active { color: var(--green-700); background: var(--green-100); }
         @media (prefers-color-scheme: dark) { .topnav-link.active { color: var(--green-400); } }
 
-        .content { flex: 1; padding: 20px 0 calc(var(--nav-h) + 28px); }
+        .content { flex: 1; padding: 28px 0 calc(var(--nav-h) + 32px); }
 
         .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; height: var(--nav-h);
           display: flex; background: var(--surface); border-top: 1px solid var(--line);

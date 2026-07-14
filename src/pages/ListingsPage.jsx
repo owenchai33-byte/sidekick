@@ -2,7 +2,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { evaluateRules } from '../lib/rules.js'
 import { listingLabel, relativeTime } from '../lib/format.js'
-import { PLATFORM_MAP } from '../../shared/constants.js'
 import PriceTag from '../components/PriceTag.jsx'
 
 function statusOf(l) {
@@ -54,7 +53,9 @@ export default function ListingsPage() {
                 {l.photos?.[0] ? (
                   <img className="lcard-photo" src={l.photos[0]} alt="" />
                 ) : (
-                  <div className="lcard-photo lcard-noimg" aria-hidden="true">{l.listingType === 'rental' ? '🔑' : '🏠'}</div>
+                  <div className="lcard-photo lcard-noimg" aria-hidden="true">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5" /></svg>
+                  </div>
                 )}
                 <div className="lcard-body">
                   <div className="lcard-top">
@@ -63,11 +64,8 @@ export default function ListingsPage() {
                     {l.example && <span className="badge badge-example">Example</span>}
                   </div>
                   <div className="lcard-title">{listingLabel(l)}</div>
-                  <PriceTag value={l.price} listingType={l.listingType} size="sm" />
                   <div className="lcard-foot">
-                    <div className="lcard-platforms">
-                      {l.platforms.slice(0, 6).map((p) => <span key={p} title={PLATFORM_MAP[p]?.name}>{PLATFORM_MAP[p]?.icon}</span>)}
-                    </div>
+                    <PriceTag value={l.price} listingType={l.listingType} size="md" />
                     <span className="lcard-time muted num">{relativeTime(l.updatedAt)}</span>
                   </div>
                 </div>
@@ -78,10 +76,10 @@ export default function ListingsPage() {
       )}
 
       <style>{`
-        .listings { display: flex; flex-direction: column; gap: 18px; }
-        .lp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-        .lp-head h1 { font-size: 25px; }
-        .lp-head p { margin-top: 4px; font-size: 13.5px; max-width: 42ch; }
+        .listings { display: flex; flex-direction: column; gap: 24px; }
+        .lp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-top: 4px; }
+        .lp-head h1 { font-size: 26px; letter-spacing: -0.02em; }
+        .lp-head p { margin-top: 5px; font-size: 13.5px; max-width: 42ch; }
         .lp-new { flex: none; }
 
         .empty { padding: 48px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
@@ -89,21 +87,20 @@ export default function ListingsPage() {
         .empty h2 { font-size: 18px; }
         .empty p { max-width: 40ch; font-size: 13.5px; }
 
-        .cards { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .cards { display: grid; grid-template-columns: 1fr; gap: 16px; }
         @media (min-width: 560px) { .cards { grid-template-columns: 1fr 1fr; } }
-        @media (min-width: 860px) { .cards { grid-template-columns: 1fr 1fr 1fr; } }
+        @media (min-width: 900px) { .cards { grid-template-columns: 1fr 1fr 1fr; } }
 
         .lcard { text-align: left; padding: 0; overflow: hidden; cursor: pointer; border: 1px solid var(--line);
-          transition: transform 0.14s var(--ease), box-shadow 0.15s, border-color 0.15s; background: var(--surface); }
+          transition: transform 0.14s var(--ease), box-shadow 0.15s, border-color 0.15s; background: var(--surface); border-radius: var(--r-lg); }
         .lcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
-        .lcard-photo { width: 100%; height: 130px; object-fit: cover; display: block; background: var(--surface-sunk); }
-        .lcard-noimg { display: grid; place-items: center; font-size: 34px; }
-        .lcard-body { padding: 13px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
+        .lcard-photo { width: 100%; height: 148px; object-fit: cover; display: block; background: var(--surface-sunk); }
+        .lcard-noimg { display: grid; place-items: center; color: var(--ink-400); }
+        .lcard-body { padding: 16px 17px 17px; display: flex; flex-direction: column; gap: 10px; }
         .lcard-top { display: flex; gap: 6px; flex-wrap: wrap; }
-        .lcard-title { font-size: 14.5px; font-weight: 700; line-height: 1.3; }
-        .lcard-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 3px; }
-        .lcard-platforms { display: flex; gap: 3px; font-size: 14px; }
-        .lcard-time { font-size: 12px; }
+        .lcard-title { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--ink-900); }
+        .lcard-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 1px; }
+        .lcard-time { font-size: 11.5px; flex: none; }
       `}</style>
     </div>
   )
