@@ -70,7 +70,12 @@ export function AppProvider({ children }) {
   }, [])
 
   const updateSettings = useCallback(async (next) => {
-    const merged = { ...settings, ...next, rules: { ...settings.rules, ...(next.rules || {}) } }
+    const merged = {
+      ...settings,
+      ...next,
+      rules: { ...settings.rules, ...(next.rules || {}) },
+      brand: { ...settings.brand, ...(next.brand || {}) },
+    }
     await store.saveSettings(merged)
     setSettings(merged)
     return merged

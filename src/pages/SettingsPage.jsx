@@ -8,11 +8,26 @@ export default function SettingsPage() {
   const { settings, updateSettings, toast, resetShowcase, clearAll } = useApp()
   const [saleT, setSaleT] = useState(String(settings.rules.saleThreshold))
   const [rentT, setRentT] = useState(String(settings.rules.rentalThreshold))
+  const [brand, setBrand] = useState(settings.brand)
   const [status, setStatus] = useState(null)
 
   useEffect(() => {
     getStatus().then(setStatus).catch(() => setStatus({ error: true }))
   }, [])
+
+  const setB = (k, v) => setBrand((b) => ({ ...b, [k]: v }))
+
+  function uploadLogo(file) {
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => setB('logo', reader.result)
+    reader.readAsDataURL(file)
+  }
+
+  async function saveBrand() {
+    await updateSettings({ brand })
+    toast('Brand kit saved', 'success')
+  }
 
   async function saveRules() {
     await updateSettings({ rules: { saleThreshold: Number(saleT) || 0, rentalThreshold: Number(rentT) || 0 } })
@@ -46,6 +61,46 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Brand kit */}
+      <section className="card block">
+        <h2 className="block-title">Brand kit</h2>
+        <p className="muted block-sub">Your logo, colour and contact are baked into every generated graphic and video.</p>
+        <div className="brand-grid">
+          <div className="brand-logo">
+            <div className="brand-logo-preview" style={{ background: brand.color || '#2d6a4f' }}>
+              {brand.logo ? <img src={brand.logo} alt="Logo" /> : <span>{(brand.agency || brand.name || 'SK').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>}
+            </div>
+            <label className="btn btn-ghost btn-sm brand-upload">
+              {brand.logo ? 'Change logo' : 'Upload logo'}
+              <input type="file" accept="image/*" className="sr-only" onChange={(e) => { uploadLogo(e.target.files[0]); e.target.value = '' }} />
+            </label>
+            {brand.logo && <button className="btn btn-subtle btn-sm" onClick={() => setB('logo', null)}>Remove</button>}
+          </div>
+          <div className="brand-fields">
+            <div className="grid2">
+              <div className="field"><label htmlFor="b-agency">Agency / business</label><input id="b-agency" className="input" placeholder="e.g. TRR Realty" value={brand.agency} onChange={(e) => setB('agency', e.target.value)} /></div>
+              <div className="field"><label htmlFor="b-name">Your name</label><input id="b-name" className="input" placeholder="e.g. Edward" value={brand.name} onChange={(e) => setB('name', e.target.value)} /></div>
+              <div className="field"><label htmlFor="b-phone">WhatsApp number</label><input id="b-phone" className="input" placeholder="e.g. 012-345 6789" value={brand.phone} onChange={(e) => setB('phone', e.target.value)} /></div>
+              <div className="field"><label htmlFor="b-color">Brand colour</label>
+                <div className="brand-color"><input id="b-color" type="color" value={brand.color || '#2d6a4f'} onChange={(e) => setB('color', e.target.value)} /><span className="num">{brand.color}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button className="btn btn-primary btn-sm" style={{ marginTop: 14 }} onClick={saveBrand}>Save brand kit</button>
+        <style>{`
+          .brand-grid { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+          .brand-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+          .brand-logo-preview { width: 92px; height: 92px; border-radius: 20px; display: grid; place-items: center; overflow: hidden; color: #fff; font-size: 30px; font-weight: 800; flex: none; }
+          .brand-logo-preview img { width: 100%; height: 100%; object-fit: cover; }
+          .brand-upload { cursor: pointer; }
+          .brand-fields { flex: 1; min-width: 240px; }
+          .brand-color { display: flex; align-items: center; gap: 10px; }
+          .brand-color input[type=color] { width: 46px; height: 42px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); cursor: pointer; }
+          .brand-color span { font-size: 13px; color: var(--ink-500); text-transform: uppercase; }
+        `}</style>
       </section>
 
       {/* Rules */}

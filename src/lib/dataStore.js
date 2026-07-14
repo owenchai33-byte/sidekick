@@ -19,6 +19,8 @@ const DEFAULT_SETTINGS = {
   defaultPlatforms: ['facebook_page', 'marketplace'],
   // Placeholder identity until Supabase auth lands (account owner = admin).
   agent: { id: 'owner', name: 'Demo Account', role: 'admin' },
+  // Brand kit — applied to generated graphics/video. Logo is a data URL.
+  brand: { agency: '', name: '', phone: '', color: '#2d6a4f', logo: null },
 }
 
 function read() {
@@ -130,7 +132,12 @@ export async function deleteLead(id) {
 // ── Settings ─────────────────────────────────────────────
 export async function getSettings() {
   const { settings } = read()
-  return { ...DEFAULT_SETTINGS, ...(settings || {}), rules: { ...DEFAULT_SETTINGS.rules, ...(settings?.rules || {}) } }
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(settings || {}),
+    rules: { ...DEFAULT_SETTINGS.rules, ...(settings?.rules || {}) },
+    brand: { ...DEFAULT_SETTINGS.brand, ...(settings?.brand || {}) },
+  }
 }
 
 export async function saveSettings(settings) {

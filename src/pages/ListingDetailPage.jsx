@@ -7,8 +7,15 @@ import { formatPrice, listingLabel } from '../lib/format.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import PriceTag from '../components/PriceTag.jsx'
 import PostCard from '../components/PostCard.jsx'
+import PropertyGraphic from '../components/PropertyGraphic.jsx'
 import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
+
+const GRAPHIC_FORMATS = [
+  { id: 'square', name: 'Square', sub: 'Feed · Marketplace' },
+  { id: 'portrait', name: 'Portrait', sub: 'Instagram feed' },
+  { id: 'story', name: 'Story', sub: 'Reels · Status' },
+]
 
 export default function ListingDetailPage() {
   const { id } = useParams()
@@ -20,6 +27,7 @@ export default function ListingDetailPage() {
   const [generating, setGenerating] = useState(false)
   const [demo, setDemo] = useState(false)
   const [editTargets, setEditTargets] = useState(false)
+  const [graphicFormat, setGraphicFormat] = useState('square')
   const autoRan = useRef(false)
 
   // Hydrate from context (already loaded from the store)
@@ -198,6 +206,23 @@ export default function ListingDetailPage() {
         </div>
       </div>
 
+      {/* Post graphics */}
+      <section className="card graphics">
+        <div className="graphics-head">
+          <div>
+            <h2 className="block-title">Post graphics</h2>
+            <p className="muted block-sub">Branded, ready to post — your photo with the price, specs and details baked in.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+          </div>
+        </div>
+        <div className="seg graphics-seg" role="group" aria-label="Graphic format">
+          {GRAPHIC_FORMATS.map((f) => (
+            <button key={f.id} className={`seg-btn ${graphicFormat === f.id ? 'on' : ''}`} onClick={() => setGraphicFormat(f.id)} title={f.sub}>{f.name}</button>
+          ))}
+        </div>
+        <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat} />
+        <p className="muted graphics-note">{GRAPHIC_FORMATS.find((f) => f.id === graphicFormat)?.sub}{!listing.photos?.length && ' · add a photo to the listing for a photo background'}</p>
+      </section>
+
       {/* Posts */}
       {generating && !hasContent ? (
         <div className="gen-skeleton">
@@ -265,6 +290,15 @@ export default function ListingDetailPage() {
 
         .posts { display: flex; flex-direction: column; gap: 14px; }
         .empty-gen { padding: 30px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+
+        .graphics { padding: 16px; }
+        .block-title { font-size: 15px; }
+        .block-sub { font-size: 12.5px; margin: 3px 0 0; }
+        .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin: 12px 0 14px; }
+        .seg-btn { border: none; background: transparent; padding: 8px 16px; border-radius: var(--r-sm); font-size: 13px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
+        .seg-btn.on { background: var(--green-700); color: #fff; }
+        @media (prefers-color-scheme: dark) { .seg-btn.on { background: var(--green-500); color: #0f2e21; } }
+        .graphics-note { font-size: 12px; text-align: center; margin-top: 10px; }
 
         .gen-skeleton { display: flex; flex-direction: column; gap: 14px; }
         .skel { padding: 18px; }
