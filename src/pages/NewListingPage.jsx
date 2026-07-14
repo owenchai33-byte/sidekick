@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
+import BackButton from '../components/BackButton.jsx'
 import { parseListing } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { PROPERTY_TYPES, KUCHING_AREAS } from '../../shared/constants.js'
@@ -102,6 +103,7 @@ export default function NewListingPage() {
 
   return (
     <div className="container newlisting">
+      <BackButton to="/" label="Listings" />
       <header className="page-head">
         <h1>New listing</h1>
         <p className="muted">You pick what's worth promoting. SideKick does the copywriting.</p>

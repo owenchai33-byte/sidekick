@@ -59,7 +59,8 @@ export default function AppShell({ children }) {
         .brand-link { text-decoration: none; display: inline-flex; align-items: center; -webkit-tap-highlight-color: transparent; }
 
         .topbar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--paper) 86%, transparent);
-          backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); }
+          backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line);
+          padding-top: env(safe-area-inset-top); }
         .topbar-inner { height: var(--nav-h); display: flex; align-items: center; justify-content: space-between; }
         .topnav { display: none; gap: 4px; }
         .topnav-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px;
@@ -68,9 +69,10 @@ export default function AppShell({ children }) {
         .topnav-link.active { color: var(--green-700); background: var(--green-100); }
         @media (prefers-color-scheme: dark) { .topnav-link.active { color: var(--green-400); } }
 
-        .content { flex: 1; padding: 28px 0 calc(var(--nav-h) + 32px); }
+        .content { flex: 1; padding: 28px 0 calc(var(--nav-h) + env(safe-area-inset-bottom) + 24px); }
 
-        .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; height: var(--nav-h);
+        .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+          height: calc(var(--nav-h) + env(safe-area-inset-bottom));
           display: flex; background: var(--surface); border-top: 1px solid var(--line);
           padding-bottom: env(safe-area-inset-bottom); }
         .bottomnav-link { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;

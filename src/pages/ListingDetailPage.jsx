@@ -5,6 +5,7 @@ import { generateContent } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
+import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
 import PostCard from '../components/PostCard.jsx'
 import PropertyGraphic from '../components/PropertyGraphic.jsx'
@@ -150,7 +151,7 @@ export default function ListingDetailPage() {
 
   return (
     <div className="container detail">
-      <Link to="/" className="back">← Listings</Link>
+      <BackButton to="/" label="Listings" />
 
       {/* Summary header */}
       <header className="summary card">
@@ -272,8 +273,6 @@ export default function ListingDetailPage() {
 
       <style>{`
         .detail { display: flex; flex-direction: column; gap: 14px; }
-        .back { align-self: flex-start; font-size: 13.5px; font-weight: 600; color: var(--ink-500); text-decoration: none; }
-        .back:hover { color: var(--ink-900); }
 
         .summary { overflow: hidden; }
         .summary-photos { display: grid; gap: 3px; background: var(--line); }
