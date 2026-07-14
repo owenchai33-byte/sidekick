@@ -9,7 +9,9 @@ import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
 import PostCard from '../components/PostCard.jsx'
 import PropertyGraphic from '../components/PropertyGraphic.jsx'
+import PropertyCarousel from '../components/PropertyCarousel.jsx'
 import PropertyVideo from '../components/PropertyVideo.jsx'
+import { downloadKit } from '../lib/kit.js'
 import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
 
@@ -30,7 +32,20 @@ export default function ListingDetailPage() {
   const [demo, setDemo] = useState(false)
   const [editTargets, setEditTargets] = useState(false)
   const [graphicFormat, setGraphicFormat] = useState('square')
+  const [kitBusy, setKitBusy] = useState(false)
   const autoRan = useRef(false)
+
+  async function handleDownloadKit() {
+    setKitBusy(true)
+    try {
+      const res = await downloadKit({ listing, brand: settings.brand })
+      toast(`Kit ready — ${res.slides} carousel slides, ${res.captionCount} caption set${res.captionCount === 1 ? '' : 's'} + graphics`, 'success')
+    } catch (e) {
+      toast('Could not build the kit: ' + e.message, 'danger')
+    } finally {
+      setKitBusy(false)
+    }
+  }
 
   // Hydrate from context (already loaded from the store)
   useEffect(() => {
@@ -213,8 +228,20 @@ export default function ListingDetailPage() {
 
       {/* Post assets */}
       <section className="card assets">
-        <h2 className="block-title">Post assets</h2>
-        <p className="muted block-sub">Branded and ready to post — no design work.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+        <div className="assets-head">
+          <div>
+            <h2 className="block-title">Post assets</h2>
+            <p className="muted block-sub">Branded and ready to post — no design work.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+          </div>
+          <button className="btn btn-primary btn-sm kit-btn" onClick={handleDownloadKit} disabled={kitBusy}>
+            {kitBusy ? 'Building…' : (
+              <>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" /></svg>
+                Download whole kit
+              </>
+            )}
+          </button>
+        </div>
         <div className="assets-grid">
           <div className="asset">
             <div className="asset-label">Graphic</div>
@@ -224,6 +251,10 @@ export default function ListingDetailPage() {
               ))}
             </div>
             <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat} />
+          </div>
+          <div className="asset">
+            <div className="asset-label">Carousel</div>
+            <PropertyCarousel listing={listing} brand={settings.brand} />
           </div>
           <div className="asset">
             <div className="asset-label">Reel video</div>
@@ -301,8 +332,9 @@ export default function ListingDetailPage() {
         .assets { padding: 20px; }
         .block-title { font-size: 16px; }
         .block-sub { font-size: 12.5px; margin: 4px 0 0; }
-        .assets-grid { display: grid; grid-template-columns: 1fr; gap: 22px; margin-top: 16px; }
-        @media (min-width: 620px) { .assets-grid { grid-template-columns: 1fr 1fr; gap: 24px; } }
+        .assets-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+        .kit-btn { flex: none; }
+        .assets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 24px; margin-top: 20px; }
         .asset { display: flex; flex-direction: column; align-items: center; }
         .asset-label { align-self: flex-start; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500); margin-bottom: 10px; }
         .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin-bottom: 14px; }
