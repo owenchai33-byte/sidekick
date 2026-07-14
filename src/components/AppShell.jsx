@@ -2,16 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import Toasts from './Toasts.jsx'
 
 function Logo() {
-  return (
-    <div className="brand" aria-label="SideKick">
-      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--green-700)" />
-        <path d="M8 20.5 16 8l8 12.5" stroke="var(--green-400)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M11.5 20.5V24h9v-3.5" stroke="var(--timber-300)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className="brand-word">Side<span className="brand-accent">Kick</span></span>
-    </div>
-  )
+  return <span className="brand" role="img" aria-label="SideKick" />
 }
 
 const NAV = [
@@ -63,11 +54,9 @@ export default function AppShell({ children }) {
 
       <style>{`
         .shell { min-height: 100%; display: flex; flex-direction: column; }
-        .brand { display: inline-flex; align-items: center; gap: 9px; }
-        .brand-link { text-decoration: none; }
-        .brand-word { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink-900); }
-        .brand-accent { color: var(--green-600); }
-        @media (prefers-color-scheme: dark) { .brand-accent { color: var(--green-400); } }
+        .brand { display: block; width: 138px; height: 28px; background: var(--ink-900);
+          -webkit-mask: url(logo.png) left center / contain no-repeat; mask: url(logo.png) left center / contain no-repeat; }
+        .brand-link { text-decoration: none; display: inline-flex; align-items: center; -webkit-tap-highlight-color: transparent; }
 
         .topbar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--paper) 86%, transparent);
           backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); }

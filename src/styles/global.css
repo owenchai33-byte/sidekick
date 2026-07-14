@@ -13,6 +13,20 @@ body {
   line-height: 1.5;
 }
 
+/* ── App-like behaviour (installable PWA) ───────────────
+   Kills the browser-y feel: no tap flash, no double-tap zoom / 300ms delay,
+   no rubber-band scroll chaining. Copy still works via the Copy buttons. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.topbar, .bottomnav, .topnav, .brand, .btn, [role="button"], nav {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+@media (display-mode: standalone) { body { min-height: 100dvh; } }
+
 h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
 p { margin: 0; }
 button { font-family: inherit; }

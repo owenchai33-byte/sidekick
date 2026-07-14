@@ -14,3 +14,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </HashRouter>
   </React.StrictMode>,
 )
+
+// Register the service worker on the deployed build so the app is installable
+// to the homescreen and works offline. Skipped in dev to keep HMR clean.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {})
+  })
+}
