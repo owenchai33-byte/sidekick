@@ -154,7 +154,10 @@ export default function ListingDetailPage() {
       {/* Summary header */}
       <header className="summary card">
         {listing.photos?.length > 0 && (
-          <div className="summary-photos">
+          <div
+            className={`summary-photos${listing.photos.length === 1 ? ' single' : ''}`}
+            style={{ gridTemplateColumns: `repeat(${Math.min(listing.photos.length, 4)}, 1fr)` }}
+          >
             {listing.photos.slice(0, 4).map((src, i) => <img key={i} src={src} alt="" />)}
           </div>
         )}
@@ -268,13 +271,13 @@ export default function ListingDetailPage() {
         .back:hover { color: var(--ink-900); }
 
         .summary { overflow: hidden; }
-        .summary-photos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; background: var(--line); max-height: 150px; }
-        .summary-photos img { width: 100%; height: 150px; object-fit: cover; }
-        .summary-photos img:only-child { grid-column: 1 / -1; height: 200px; object-position: center; }
-        .summary-body { padding: 16px; }
-        .summary-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
-        .summary-top h1 { font-size: 20px; }
-        .summary-specs { font-size: 13px; margin-top: 4px; }
+        .summary-photos { display: grid; gap: 3px; background: var(--line); }
+        .summary-photos img { width: 100%; height: 150px; object-fit: cover; display: block; }
+        .summary-photos.single img { height: 230px; }
+        .summary-body { padding: 20px; }
+        .summary-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+        .summary-top h1 { font-size: 21px; letter-spacing: -0.01em; line-height: 1.25; }
+        .summary-specs { font-size: 13px; margin-top: 6px; line-height: 1.5; }
         .summary-rule { margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--timber-700); background: color-mix(in srgb, var(--timber-500) 12%, transparent); padding: 7px 11px; border-radius: var(--r-sm); }
         @media (prefers-color-scheme: dark) { .summary-rule { color: var(--timber-300); } }
 
