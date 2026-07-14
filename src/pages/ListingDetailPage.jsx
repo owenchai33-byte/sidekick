@@ -156,6 +156,7 @@ export default function ListingDetailPage() {
               <div className="row wrap" style={{ gap: 8, marginBottom: 6 }}>
                 <span className="badge badge-neutral">{listing.listingType === 'rental' ? 'Rental' : 'Sale'}</span>
                 {rule.flagged && <span className="badge badge-flag">Flagged</span>}
+                {listing.example && <span className="badge badge-example">Example</span>}
                 {demo && <span className="badge badge-demo">Sample copy</span>}
               </div>
               <h1>{listingLabel(listing)}</h1>

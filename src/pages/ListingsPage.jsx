@@ -60,6 +60,7 @@ export default function ListingsPage() {
                   <div className="lcard-top">
                     <span className={`badge ${st.cls}`}>{st.label}</span>
                     {rule.flagged && <span className="badge badge-flag">Flagged</span>}
+                    {l.example && <span className="badge badge-example">Example</span>}
                   </div>
                   <div className="lcard-title">{listingLabel(l)}</div>
                   <PriceTag value={l.price} listingType={l.listingType} size="sm" />

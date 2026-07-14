@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import * as store from '../lib/dataStore.js'
+import { buildShowcase } from '../lib/seed.js'
 
 const AppContext = createContext(null)
 
@@ -13,16 +14,31 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     let alive = true
-    Promise.all([store.listListings(), store.listLeads(), store.getSettings()]).then(([ls, lds, s]) => {
-      if (!alive) return
-      setListings(ls)
-      setLeads(lds)
-      setSettings(s)
-      setLoading(false)
-    })
+    store
+      .ensureSeeded(buildShowcase)
+      .then(() => Promise.all([store.listListings(), store.listLeads(), store.getSettings()]))
+      .then(([ls, lds, s]) => {
+        if (!alive) return
+        setListings(ls)
+        setLeads(lds)
+        setSettings(s)
+        setLoading(false)
+      })
     return () => {
       alive = false
     }
+  }, [])
+
+  const resetShowcase = useCallback(async () => {
+    await store.resetShowcase(buildShowcase)
+    setListings(await store.listListings())
+    setLeads(await store.listLeads())
+  }, [])
+
+  const clearAll = useCallback(async () => {
+    await store.clearAll()
+    setListings([])
+    setLeads([])
   }, [])
 
   const toast = useCallback((message, kind = 'success') => {
@@ -67,6 +83,7 @@ export function AppProvider({ children }) {
   const value = {
     listings, leads, settings, loading, toasts, toast,
     refresh, saveListing, removeListing, saveLead, removeLead, updateSettings,
+    resetShowcase, clearAll,
     newId: store.newId,
   }
 

@@ -39,6 +39,35 @@ export function newId() {
   return (crypto.randomUUID?.() || 'id-' + Math.random().toString(36).slice(2))
 }
 
+// ── Showcase seeding ─────────────────────────────────────
+// Seeds example data once (first ever load). Clearing sets the seeded flag so
+// it won't re-appear; "reset" re-seeds on demand. Both live in Settings.
+export async function ensureSeeded(buildShowcase) {
+  const state = read()
+  // Only auto-seed a genuinely empty store — never clobber real data.
+  if (state.meta?.seeded || Object.keys(state.listings || {}).length > 0) return false
+  writeSeed(buildShowcase())
+  return true
+}
+
+export async function resetShowcase(buildShowcase) {
+  writeSeed(buildShowcase())
+}
+
+export async function clearAll() {
+  const { settings } = read()
+  localStorage.setItem(LKEY, JSON.stringify({ settings, meta: { seeded: true } }))
+}
+
+function writeSeed({ listings, leads }) {
+  const { settings } = read()
+  const lmap = {}
+  const ldmap = {}
+  for (const l of listings) lmap[l.id] = l
+  for (const x of leads) ldmap[x.id] = x
+  localStorage.setItem(LKEY, JSON.stringify({ settings, listings: lmap, leads: ldmap, meta: { seeded: true } }))
+}
+
 // ── Listings ─────────────────────────────────────────────
 export async function listListings() {
   const { listings = {} } = read()

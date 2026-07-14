@@ -5,7 +5,7 @@ import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
 
 export default function SettingsPage() {
-  const { settings, updateSettings, toast } = useApp()
+  const { settings, updateSettings, toast, resetShowcase, clearAll } = useApp()
   const [saleT, setSaleT] = useState(String(settings.rules.saleThreshold))
   const [rentT, setRentT] = useState(String(settings.rules.rentalThreshold))
   const [status, setStatus] = useState(null)
@@ -78,9 +78,21 @@ export default function SettingsPage() {
         <LanguagePicker selected={settings.defaultLanguages} onToggle={(v) => toggleDefault('defaultLanguages', v)} />
       </section>
 
+      <section className="card block">
+        <h2 className="block-title">Showcase data</h2>
+        <p className="muted block-sub">The app opens pre-loaded with example listings and a live pipeline so it demos as a finished system. Reset them anytime, or clear everything to start from scratch.</p>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <button className="btn btn-subtle btn-sm" onClick={async () => { await resetShowcase(); toast('Showcase examples reset', 'success') }}>Reset examples</button>
+          <button className="btn btn-ghost btn-sm danger-ghost" onClick={async () => { if (confirm('Clear all listings and leads? This starts the app empty.')) { await clearAll(); toast('All data cleared', 'success') } }}>Clear everything</button>
+        </div>
+      </section>
+
       <p className="muted foot-note">
         Signed-in as <strong>{settings.agent.name}</strong> ({settings.agent.role}). Multi-agent accounts, lead attribution and closed-deal logging arrive in Phase 2.
       </p>
+
+      <style>{`.danger-ghost { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+        .danger-ghost:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }`}</style>
 
       <style>{`
         .settings { display: flex; flex-direction: column; gap: 16px; }
