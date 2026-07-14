@@ -8,6 +8,7 @@ import { PLATFORM_MAP } from '../../shared/constants.js'
 import PriceTag from '../components/PriceTag.jsx'
 import PostCard from '../components/PostCard.jsx'
 import PropertyGraphic from '../components/PropertyGraphic.jsx'
+import PropertyVideo from '../components/PropertyVideo.jsx'
 import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
 
@@ -209,21 +210,25 @@ export default function ListingDetailPage() {
         </div>
       </div>
 
-      {/* Post graphics */}
-      <section className="card graphics">
-        <div className="graphics-head">
-          <div>
-            <h2 className="block-title">Post graphics</h2>
-            <p className="muted block-sub">Branded, ready to post — your photo with the price, specs and details baked in.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+      {/* Post assets */}
+      <section className="card assets">
+        <h2 className="block-title">Post assets</h2>
+        <p className="muted block-sub">Branded and ready to post — no design work.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+        <div className="assets-grid">
+          <div className="asset">
+            <div className="asset-label">Graphic</div>
+            <div className="seg graphics-seg" role="group" aria-label="Graphic format">
+              {GRAPHIC_FORMATS.map((f) => (
+                <button key={f.id} className={`seg-btn ${graphicFormat === f.id ? 'on' : ''}`} onClick={() => setGraphicFormat(f.id)} title={f.sub}>{f.name}</button>
+              ))}
+            </div>
+            <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat} />
+          </div>
+          <div className="asset">
+            <div className="asset-label">Reel video</div>
+            <PropertyVideo listing={listing} brand={settings.brand} />
           </div>
         </div>
-        <div className="seg graphics-seg" role="group" aria-label="Graphic format">
-          {GRAPHIC_FORMATS.map((f) => (
-            <button key={f.id} className={`seg-btn ${graphicFormat === f.id ? 'on' : ''}`} onClick={() => setGraphicFormat(f.id)} title={f.sub}>{f.name}</button>
-          ))}
-        </div>
-        <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat} />
-        <p className="muted graphics-note">{GRAPHIC_FORMATS.find((f) => f.id === graphicFormat)?.sub}{!listing.photos?.length && ' · add a photo to the listing for a photo background'}</p>
       </section>
 
       {/* Posts */}
@@ -294,14 +299,17 @@ export default function ListingDetailPage() {
         .posts { display: flex; flex-direction: column; gap: 14px; }
         .empty-gen { padding: 30px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 
-        .graphics { padding: 16px; }
-        .block-title { font-size: 15px; }
-        .block-sub { font-size: 12.5px; margin: 3px 0 0; }
-        .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin: 12px 0 14px; }
-        .seg-btn { border: none; background: transparent; padding: 8px 16px; border-radius: var(--r-sm); font-size: 13px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
+        .assets { padding: 20px; }
+        .block-title { font-size: 16px; }
+        .block-sub { font-size: 12.5px; margin: 4px 0 0; }
+        .assets-grid { display: grid; grid-template-columns: 1fr; gap: 22px; margin-top: 16px; }
+        @media (min-width: 620px) { .assets-grid { grid-template-columns: 1fr 1fr; gap: 24px; } }
+        .asset { display: flex; flex-direction: column; align-items: center; }
+        .asset-label { align-self: flex-start; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500); margin-bottom: 10px; }
+        .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin-bottom: 14px; }
+        .seg-btn { border: none; background: transparent; padding: 8px 14px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
         .seg-btn.on { background: var(--green-700); color: #fff; }
         @media (prefers-color-scheme: dark) { .seg-btn.on { background: var(--green-500); color: #0f2e21; } }
-        .graphics-note { font-size: 12px; text-align: center; margin-top: 10px; }
 
         .gen-skeleton { display: flex; flex-direction: column; gap: 14px; }
         .skel { padding: 18px; }
