@@ -47,10 +47,6 @@ export function AppProvider({ children }) {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200)
   }, [])
 
-  const refresh = useCallback(async () => {
-    setListings(await store.listListings())
-  }, [])
-
   const saveListing = useCallback(async (listing) => {
     const saved = await store.upsertListing(listing)
     setListings(await store.listListings())
@@ -82,7 +78,7 @@ export function AppProvider({ children }) {
 
   const value = {
     listings, leads, settings, loading, toasts, toast,
-    refresh, saveListing, removeListing, saveLead, removeLead, updateSettings,
+    saveListing, removeListing, saveLead, removeLead, updateSettings,
     resetShowcase, clearAll,
     newId: store.newId,
   }

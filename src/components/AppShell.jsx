@@ -16,8 +16,7 @@ function Logo() {
 
 const NAV = [
   { to: '/', label: 'Listings', icon: 'M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5', end: true },
-  { to: '/new', label: 'New', icon: 'M12 5v14M5 12h14' },
-  { to: '/pipeline', label: 'Pipeline', icon: 'M3 3v18h18M7 15l3-3 3 2 4-5' },
+  { to: '/pipeline', label: 'Dashboard', icon: 'M3 3v18h18M7 15l3-3 3 2 4-5' },
   { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 100-6 3 3 0 000 6zM12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5 19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5 19 5' },
 ]
 

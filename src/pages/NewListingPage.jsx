@@ -83,7 +83,6 @@ export default function NewListingPage() {
         tenure: fields.tenure || null,
         furnishing: fields.furnishing || null,
         title: fields.title.trim() || null,
-        rawInput: raw.trim() || null,
         photos,
         videos,
         platforms,
