@@ -1,16 +1,33 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { LANGUAGE_MAP } from '../../shared/constants.js'
 import { getVideoBlob } from '../lib/media.js'
 import { copyText } from '../lib/clipboard.js'
+import { useApp } from '../context/AppContext.jsx'
+import { waEnquiryLink } from '../lib/whatsapp.js'
 
 // The one-tap publish helper. Same three-step layout for EVERY platform so the
 // agent learns it once: copy the exact caption, save the photos/video, open the
 // platform and paste. Deliberately manual (no automation) to protect accounts.
 export default function PublishSheet({ platform, listing, lang, text, photos = [], videos = [], videoUrls = {}, onClose, onPublished, toast }) {
+  const { settings } = useApp()
   const [copied, setCopied] = useState(false)
+  const [waCopied, setWaCopied] = useState(false)
   const base = (listing?.title || listing?.location || 'listing').replace(/[^\w]+/g, '-').toLowerCase()
   const mediaCount = photos.length + videos.length
   const neverAuto = platform.autopost === 'never'
+  const waLink = waEnquiryLink(settings?.brand?.phone, listing, platform.name)
+
+  async function copyWa() {
+    const ok = await copyText(waLink)
+    if (ok) {
+      setWaCopied(true)
+      setTimeout(() => setWaCopied(false), 2000)
+      toast?.('WhatsApp link copied', 'success')
+    } else {
+      toast?.('Copy blocked — long-press the link to copy', 'warn')
+    }
+  }
 
   async function copyCaption() {
     const ok = await copyText(text)
@@ -67,6 +84,20 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           <div className="ps-guard">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
             Posted by hand to keep the account safe — 3 quick steps.
+          </div>
+        )}
+
+        {waLink ? (
+          <div className="ps-wa">
+            <div className="ps-wa-title">📲 Your trackable WhatsApp link</div>
+            <p className="ps-wa-sub">Put this in your post (or bio). When a buyer taps it, their message tells you it came from <strong>{platform.name}</strong> — so you always know which post is working.</p>
+            <button className={`btn btn-block ${waCopied ? 'btn-accent' : 'btn-subtle'}`} onClick={copyWa}>
+              {waCopied ? '✓ Link copied' : 'Copy WhatsApp link'}
+            </button>
+          </div>
+        ) : (
+          <div className="ps-wa ps-wa-empty">
+            📲 Add your WhatsApp number in <Link to="/settings" onClick={onClose}>Settings → Brand kit</Link> to get a trackable enquiry link for every post.
           </div>
         )}
 
@@ -133,6 +164,15 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           color: var(--timber-700); background: color-mix(in srgb, var(--timber-500) 14%, transparent);
           border-radius: var(--r-sm); padding: 8px 11px; margin-bottom: 14px; }
         @media (prefers-color-scheme: dark) { .ps-guard { color: var(--timber-300); } }
+
+        .ps-wa { background: var(--green-100); border-radius: var(--r-md); padding: 13px 14px; margin-bottom: 16px; }
+        @media (prefers-color-scheme: dark) { .ps-wa { background: color-mix(in srgb, var(--green-700) 20%, transparent); } }
+        .ps-wa-title { font-size: 13.5px; font-weight: 800; color: var(--green-800); }
+        @media (prefers-color-scheme: dark) { .ps-wa-title { color: var(--green-400); } }
+        .ps-wa-sub { font-size: 12px; color: var(--ink-600, var(--ink-700)); margin: 4px 0 11px; line-height: 1.5; }
+        .ps-wa-empty { font-size: 12.5px; color: var(--ink-500); line-height: 1.5; }
+        .ps-wa-empty a { color: var(--green-700); font-weight: 700; }
+        @media (prefers-color-scheme: dark) { .ps-wa-empty a { color: var(--green-400); } }
 
         .ps-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
         .ps-step-head { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 700; margin-bottom: 9px; }

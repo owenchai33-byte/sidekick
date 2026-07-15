@@ -7,6 +7,7 @@ import PriceTag from '../components/PriceTag.jsx'
 
 const EMPTY_LEAD = { listingId: '', platform: '', name: '', contact: '', stage: 'new', note: '' }
 const STAGE_ORDER = Object.fromEntries(LEAD_STAGES.map((s, i) => [s.id, i]))
+const OPEN_STAGES = LEAD_STAGES.filter((s) => s.open)
 
 export default function PipelinePage() {
   const { listings, leads, settings, saveLead, removeLead, newId, toast } = useApp()
@@ -30,9 +31,24 @@ export default function PipelinePage() {
     const lost = leads.filter((l) => l.stage === 'lost')
     const wonValue = won.reduce((s, l) => s + (Number(l.value) || 0), 0)
     const closedCount = won.length + lost.length
+
+    // Where leads come from — per platform, for the ROI view.
+    const byPlatform = {}
+    for (const l of leads) {
+      const p = l.platform || 'unknown'
+      if (!byPlatform[p]) byPlatform[p] = { enquiries: 0, won: 0, value: 0 }
+      byPlatform[p].enquiries++
+      if (l.stage === 'won') { byPlatform[p].won++; byPlatform[p].value += Number(l.value) || 0 }
+    }
+    const platformStats = Object.entries(byPlatform)
+      .map(([id, s]) => ({ id, ...s }))
+      .sort((a, b) => b.enquiries - a.enquiries || b.won - a.won)
+    const maxEnq = Math.max(1, ...platformStats.map((s) => s.enquiries))
+
     return {
       livePosts, liveCount, openLeads, won, lost, wonValue,
       winRate: closedCount ? Math.round((won.length / closedCount) * 100) : null,
+      platformStats, maxEnq,
     }
   }, [listings, leads])
 
@@ -96,6 +112,40 @@ export default function PipelinePage() {
           )
         })}
       </div>
+
+      {/* Where leads come from — the ROI story, always visible */}
+      {data.platformStats.length > 0 && (
+        <section className="card roi">
+          <div className="roi-head">
+            <h2>Where your leads come from</h2>
+            <p className="muted">Which posts actually bring in buyers — and money.</p>
+          </div>
+          <div className="roi-rows">
+            {data.platformStats.map((s) => {
+              const p = PLATFORM_MAP[s.id]
+              return (
+                <div className="roi-row" key={s.id}>
+                  <div className="roi-plat"><span className="roi-ic" aria-hidden="true">{p?.icon || '📍'}</span>{p?.short || 'Other'}</div>
+                  <div className="roi-bar-wrap">
+                    <div className="roi-bar" style={{ width: `${Math.max(8, (s.enquiries / data.maxEnq) * 100)}%` }} />
+                  </div>
+                  <div className="roi-nums">
+                    <span className="roi-enq num">{s.enquiries}</span>
+                    <span className="roi-enq-label">{s.enquiries === 1 ? 'enquiry' : 'enquiries'}</span>
+                    {s.won > 0 && <span className="roi-won num">🎉 {s.won} sold</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {data.wonValue > 0 && (
+            <div className="roi-foot">
+              <span>Closed so far</span>
+              <strong className="num">{formatPrice(data.wonValue)}</strong>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Log a lead */}
       {logging && view === 'leads' && (
@@ -213,6 +263,29 @@ export default function PipelinePage() {
         .tile-caret { position: absolute; top: 11px; right: 11px; color: var(--ink-400); font-size: 16px; line-height: 1; }
         .tile-on .tile-caret { color: var(--green-600); }
 
+        .roi { padding: 18px; }
+        .roi-head h2 { font-size: 16px; letter-spacing: -0.01em; }
+        .roi-head p { font-size: 12.5px; margin-top: 3px; }
+        .roi-rows { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+        .roi-row { display: grid; grid-template-columns: 118px 1fr auto; align-items: center; gap: 12px; }
+        .roi-plat { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; color: var(--ink-900); }
+        .roi-ic { font-size: 15px; }
+        .roi-bar-wrap { height: 12px; background: var(--surface-sunk); border-radius: 999px; overflow: hidden; }
+        .roi-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--green-500), var(--green-600)); transition: width 0.4s var(--ease); }
+        .roi-nums { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+        .roi-enq { font-size: 17px; font-weight: 800; color: var(--ink-900); }
+        .roi-enq-label { font-size: 11px; color: var(--ink-500); }
+        .roi-won { font-size: 11.5px; font-weight: 700; color: var(--green-700); margin-left: 4px; }
+        @media (prefers-color-scheme: dark) { .roi-won { color: var(--green-400); } }
+        .roi-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 14px;
+          border-top: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink-500); }
+        .roi-foot strong { font-size: 20px; color: var(--green-700); letter-spacing: -0.02em; }
+        @media (prefers-color-scheme: dark) { .roi-foot strong { color: var(--green-400); } }
+        @media (max-width: 440px) {
+          .roi-row { grid-template-columns: 92px 1fr; grid-template-areas: "plat nums" "bar bar"; row-gap: 6px; }
+          .roi-plat { grid-area: plat; } .roi-nums { grid-area: nums; justify-content: flex-end; } .roi-bar-wrap { grid-area: bar; }
+        }
+
         .logform { padding: 16px; }
         .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
 
@@ -306,12 +379,18 @@ function LeadRow({ lead, listings, onStage, onDelete, onValue, showValue }) {
         )}
       </div>
       <div className="lc-actions">
-        <select className="select lc-stage" value={lead.stage} onChange={(e) => onStage(lead, e.target.value)} aria-label="Change stage">
-          {LEAD_STAGES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <button className="lc-del" onClick={() => onDelete(lead.id)} aria-label="Delete lead" title="Delete">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
-        </button>
+        <div className="lc-stages">
+          {OPEN_STAGES.map((s) => (
+            <button key={s.id} className={`lc-chip ${lead.stage === s.id ? 'on' : ''}`} onClick={() => onStage(lead, s.id)}>{s.name}</button>
+          ))}
+        </div>
+        <div className="lc-close-row">
+          <button className={`lc-won ${lead.stage === 'won' ? 'on' : ''}`} onClick={() => onStage(lead, 'won')}>🎉 Won</button>
+          <button className={`lc-lost ${lead.stage === 'lost' ? 'on' : ''}`} onClick={() => onStage(lead, 'lost')}>Lost</button>
+          <button className="lc-del" onClick={() => onDelete(lead.id)} aria-label="Delete lead" title="Delete">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
+          </button>
+        </div>
       </div>
       <style>{`
         .lc { padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; }
@@ -325,10 +404,23 @@ function LeadRow({ lead, listings, onStage, onDelete, onValue, showValue }) {
         .lc-note { font-size: 12px; }
         .lc-value { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green-700); }
         .lc-value .input { width: 130px; padding: 7px 9px; font-size: 13px; }
-        .lc-actions { display: flex; align-items: center; gap: 8px; }
-        .lc-stage { flex: 1; padding: 8px 10px; font-size: 12.5px; }
-        .lc-del { border: none; background: transparent; color: var(--ink-400); cursor: pointer; padding: 7px; border-radius: 6px; flex: none; }
-        .lc-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+        .lc-actions { display: flex; flex-direction: column; gap: 7px; }
+        .lc-stages { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .lc-chip { padding: 9px 6px; font-size: 12px; font-weight: 700; border-radius: 8px; border: 1px solid var(--line);
+          background: var(--surface); color: var(--ink-500); cursor: pointer; transition: all 0.14s var(--ease); -webkit-tap-highlight-color: transparent; }
+        .lc-chip:hover { border-color: var(--line-strong); color: var(--ink-700); }
+        .lc-chip.on { background: var(--green-700); color: #fff; border-color: var(--green-700); }
+        @media (prefers-color-scheme: dark) { .lc-chip.on { background: var(--green-500); color: #0f2e21; border-color: var(--green-500); } }
+        .lc-close-row { display: flex; gap: 6px; }
+        .lc-won, .lc-lost { flex: 1; padding: 9px; font-size: 12px; font-weight: 700; border-radius: 8px; border: 1px solid var(--line);
+          background: var(--surface); color: var(--ink-500); cursor: pointer; transition: all 0.14s var(--ease); -webkit-tap-highlight-color: transparent; }
+        .lc-won:hover { border-color: var(--green-500); color: var(--green-700); }
+        .lc-won.on { background: var(--green-600); color: #fff; border-color: var(--green-600); }
+        .lc-lost:hover { border-color: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--danger); }
+        .lc-lost.on { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+        .lc-del { flex: none; width: 42px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-400);
+          cursor: pointer; border-radius: 8px; display: grid; place-items: center; transition: all 0.14s var(--ease); }
+        .lc-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
         .stage-neutral { background: var(--surface-sunk); color: var(--ink-500); }
         .stage-info { background: var(--green-100); color: var(--green-700); }
         .stage-warn { background: color-mix(in srgb, var(--timber-500) 20%, transparent); color: var(--timber-700); }
