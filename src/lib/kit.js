@@ -2,7 +2,7 @@
 // ready-to-post captions (tri-language, per platform), the branded graphic in
 // three sizes, and the multi-slide carousel. Reuses the shared graphics lib so
 // the bundled assets are identical to what's previewed on the page.
-import { SIZES, loadImage, drawCard, renderCarousel } from './graphics.js'
+import { loadImage, renderGraphicCanvas, renderCarousel } from './graphics.js'
 import { makeZip, canvasToBytes, textBytes } from './zip.js'
 import { formatPrice, listingLabel } from './format.js'
 import { PLATFORM_MAP, LANGUAGES } from '../../shared/constants.js'
@@ -19,19 +19,16 @@ export async function buildKit({ listing, brand }) {
   const logo = loaded[0]
   const photos = loaded.slice(1)
 
-  // Branded graphic — three sizes
+  // Branded graphic — three sizes, high-res
   for (const fmt of ['square', 'portrait', 'story']) {
-    const [W, H] = SIZES[fmt]
-    const c = document.createElement('canvas')
-    c.width = W; c.height = H
-    drawCard(c.getContext('2d'), W, H, listing, brand, photos[0] || null, logo)
-    files.push({ name: `graphics/${base}-${fmt}.png`, data: await canvasToBytes(c) })
+    const c = renderGraphicCanvas({ listing, brand, format: fmt, photo: photos[0] || null, logo })
+    files.push({ name: `graphics/${base}-${fmt}.jpg`, data: await canvasToBytes(c, 'image/jpeg', 0.92) })
   }
 
-  // Carousel slides
+  // Carousel slides, high-res
   const slides = renderCarousel({ listing, brand, photos, logo })
   for (let i = 0; i < slides.length; i++) {
-    files.push({ name: `carousel/slide-${String(i + 1).padStart(2, '0')}.png`, data: await canvasToBytes(slides[i]) })
+    files.push({ name: `carousel/slide-${String(i + 1).padStart(2, '0')}.jpg`, data: await canvasToBytes(slides[i], 'image/jpeg', 0.92) })
   }
 
   // Captions — one file per platform, all three languages inside

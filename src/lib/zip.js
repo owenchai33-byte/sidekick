@@ -98,8 +98,8 @@ export function makeZip(files) {
   return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' })
 }
 
-export async function canvasToBytes(canvas) {
-  const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'))
+export async function canvasToBytes(canvas, type = 'image/png', quality) {
+  const blob = await new Promise((res) => canvas.toBlob(res, type, quality))
   return new Uint8Array(await blob.arrayBuffer())
 }
 

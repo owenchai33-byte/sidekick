@@ -30,7 +30,7 @@ export default function PropertyCarousel({ listing, brand }) {
       const photos = loaded.slice(1)
       const canvases = renderCarousel({ listing, brand, photos, logo })
       canvasesRef.current = canvases
-      setSlides(canvases.map((c) => c.toDataURL('image/png')))
+      setSlides(canvases.map((c) => c.toDataURL('image/jpeg', 0.9)))
       setReady(true)
     })
     return () => { alive = false }
@@ -39,7 +39,7 @@ export default function PropertyCarousel({ listing, brand }) {
 
   async function download() {
     const files = await Promise.all(
-      canvasesRef.current.map(async (c, idx) => ({ name: `slide-${String(idx + 1).padStart(2, '0')}.png`, data: await canvasToBytes(c) })),
+      canvasesRef.current.map(async (c, idx) => ({ name: `slide-${String(idx + 1).padStart(2, '0')}.jpg`, data: await canvasToBytes(c, 'image/jpeg', 0.92) })),
     )
     const blob = makeZip(files)
     const url = URL.createObjectURL(blob)

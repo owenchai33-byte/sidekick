@@ -6,6 +6,32 @@ import { formatPrice, listingLabel } from './format.js'
 
 export const SIZES = { square: [1080, 1080], story: [1080, 1920], portrait: [1080, 1350] }
 
+// Render at 2× the logical size for crisp, high-resolution output. All drawing
+// code works in the logical 1080-wide space; the context is scaled so the
+// actual pixels are doubled (e.g. a square exports at 2160×2160).
+export const RENDER_SCALE = 2
+
+// A canvas pre-scaled for high-res output with high-quality image smoothing so
+// downscaled photos stay sharp instead of soft.
+export function makeCanvas(W, H, scale = RENDER_SCALE) {
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(W * scale)
+  canvas.height = Math.round(H * scale)
+  const ctx = canvas.getContext('2d')
+  ctx.scale(scale, scale)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  return { canvas, ctx }
+}
+
+// The branded single-image card as a ready-to-export high-res canvas.
+export function renderGraphicCanvas({ listing, brand, format = 'square', photo, logo, scale = RENDER_SCALE }) {
+  const [W, H] = SIZES[format] || SIZES.square
+  const { canvas, ctx } = makeCanvas(W, H, scale)
+  drawCard(ctx, W, H, listing, brand, photo, logo)
+  return canvas
+}
+
 export function loadImage(src) {
   return new Promise((resolve) => {
     if (!src) return resolve(null)
@@ -244,9 +270,7 @@ export function renderCarousel({ listing, brand, photos, logo }) {
   const total = plan.length
 
   return plan.map((slide, index) => {
-    const c = document.createElement('canvas')
-    c.width = S; c.height = S
-    const ctx = c.getContext('2d')
+    const { canvas: c, ctx } = makeCanvas(S, S)
 
     if (slide.type === 'cover' || slide.type === 'photo') {
       const photo = photos?.[slide.type === 'cover' ? 0 : slide.photoIndex]
