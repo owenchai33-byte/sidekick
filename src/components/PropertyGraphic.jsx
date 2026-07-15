@@ -6,7 +6,7 @@ import { loadImage, renderGraphicCanvas } from '../lib/graphics.js'
 // the shared graphics lib and exports a full-resolution PNG. The drawing logic
 // lives in ../lib/graphics.js so the carousel and the kit bundler reuse it.
 
-export default function PropertyGraphic({ listing, brand, format = 'square' }) {
+export default function PropertyGraphic({ listing, brand, format = 'square', children }) {
   const canvasRef = useRef(null)
   const [ready, setReady] = useState(false)
   const key = JSON.stringify([
@@ -48,6 +48,7 @@ export default function PropertyGraphic({ listing, brand, format = 'square' }) {
   return (
     <div className={`pg pg-${format}`}>
       <canvas ref={canvasRef} className="pg-canvas" />
+      {children}
       <button className="btn btn-subtle btn-sm pg-dl" onClick={download} disabled={!ready}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
         Download image

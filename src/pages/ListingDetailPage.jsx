@@ -245,12 +245,13 @@ export default function ListingDetailPage() {
         <div className="assets-grid">
           <div className="asset">
             <div className="asset-label">Graphic</div>
-            <div className="seg graphics-seg" role="group" aria-label="Graphic format">
-              {GRAPHIC_FORMATS.map((f) => (
-                <button key={f.id} className={`seg-btn ${graphicFormat === f.id ? 'on' : ''}`} onClick={() => setGraphicFormat(f.id)} title={f.sub}>{f.name}</button>
-              ))}
-            </div>
-            <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat} />
+            <PropertyGraphic listing={listing} brand={settings.brand} format={graphicFormat}>
+              <div className="seg graphics-seg" role="group" aria-label="Graphic format">
+                {GRAPHIC_FORMATS.map((f) => (
+                  <button key={f.id} className={`seg-btn ${graphicFormat === f.id ? 'on' : ''}`} onClick={() => setGraphicFormat(f.id)} title={f.sub}>{f.name}</button>
+                ))}
+              </div>
+            </PropertyGraphic>
           </div>
           <div className="asset">
             <div className="asset-label">Carousel</div>
@@ -337,7 +338,7 @@ export default function ListingDetailPage() {
         .assets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 24px; margin-top: 20px; }
         .asset { display: flex; flex-direction: column; align-items: center; }
         .asset-label { align-self: flex-start; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500); margin-bottom: 10px; }
-        .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin-bottom: 14px; }
+        .graphics-seg { display: inline-flex; gap: 4px; background: var(--surface-sunk); padding: 4px; border-radius: var(--r-md); margin: 2px 0; }
         .seg-btn { border: none; background: transparent; padding: 8px 14px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 700; color: var(--ink-500); cursor: pointer; transition: all 0.15s var(--ease); }
         .seg-btn.on { background: var(--green-700); color: #fff; }
         @media (prefers-color-scheme: dark) { .seg-btn.on { background: var(--green-500); color: #0f2e21; } }
