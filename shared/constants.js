@@ -14,6 +14,7 @@ export const PLATFORMS = [
     short: 'FB Page',
     icon: '📘',
     style: 'Long-form, warm, storytelling. Emoji-light. Full detail. End with a call to action to DM.',
+    brief: 'Warm, story-led post of 4–6 short lines. Open with a hook about the lifestyle or who would love it — not the specs. Work in 2–3 concrete facts (price, beds, area). At most 1–2 emoji. Close by inviting a DM/WhatsApp to arrange a viewing. No hashtags.',
     compose: 'https://www.facebook.com/',
     autopost: 'phase2', // Graph API possible after Meta app review
     note: 'Paste into a new Page post.',
@@ -24,6 +25,7 @@ export const PLATFORMS = [
     short: 'Marketplace',
     icon: '🏷️',
     style: 'Punchy and scannable. Keyword-heavy for search. Price forward. Short lines.',
+    brief: 'Buyer-search copy, highly scannable. Line 1: price + property type + area. Then 2–4 short spec lines (beds/baths/sqft/furnishing/tenure). Keyword-rich so it surfaces in search. No emoji, no hashtags. End with a one-line "WhatsApp/PM to view".',
     compose: 'https://www.facebook.com/marketplace/create/item',
     autopost: 'never', // No posting API — automation = ban. One-tap only, forever.
     note: 'Never automated — copy in and post by hand (protects the account).',
@@ -34,6 +36,7 @@ export const PLATFORMS = [
     short: 'Mudah',
     icon: '🧾',
     style: 'Structured and factual. Portal-conventional. Keyword-rich. Clear spec lines.',
+    brief: 'Portal-style factual listing. A clear title line, then clean labelled spec lines (Type, Bedrooms, Bathrooms, Built-up, Tenure, Furnishing). Neutral and complete, keyword-rich. No emoji, no hashtags. Close with a plain contact-to-view line.',
     compose: 'https://www.mudah.my/malaysia/properties-for-sale-3000',
     autopost: 'never',
     note: 'No posting API — one-tap only.',
@@ -44,6 +47,7 @@ export const PLATFORMS = [
     short: 'Portals',
     icon: '🏢',
     style: 'Formal and complete. Full specs. Professional tone. Suited to iProperty / EdgeProp.',
+    brief: 'Formal iProperty/EdgeProp listing. A professional 2–3 sentence description in full prose, then a concise spec summary. Complete, credible, no slang, no emoji, no hashtags. Close by inviting an inspection through the marketing agent.',
     compose: 'https://www.iproperty.com.my/',
     autopost: 'never',
     note: 'iProperty / EdgeProp — one-tap only.',
@@ -54,6 +58,7 @@ export const PLATFORMS = [
     short: 'TikTok',
     icon: '🎵',
     style: 'Hook-first opening line. Short. Trend-aware. Hashtags at the end.',
+    brief: 'Scroll-stopping hook in the first 5 words (e.g. "POV:", "Stop scrolling", "This one…"). 2–4 punchy lines, playful and current. 1–3 emoji. End with a comment/DM prompt, then 4–6 niche hashtags (#kuchingproperty #sarawak …).',
     compose: 'https://www.tiktok.com/upload',
     autopost: 'phase2', // Posting API exists but approval is slow
     note: 'Prepare the caption; upload the video yourself.',
@@ -64,6 +69,7 @@ export const PLATFORMS = [
     short: 'Instagram',
     icon: '📸',
     style: 'Caption with intentional line breaks, then a hashtag block. Visual-first framing.',
+    brief: 'Aspirational caption of 3–5 short lines with intentional line breaks. Include price + 2–3 key specs. 2–4 emoji used naturally. A clear "DM to view" CTA, then a block of 6–10 relevant hashtags on their own line.',
     compose: 'https://www.instagram.com/',
     autopost: 'phase2', // Content Publishing API possible after Meta app review
     note: 'Paste the caption when you post the photos.',

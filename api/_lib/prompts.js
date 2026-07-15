@@ -51,29 +51,41 @@ export function buildContentPrompt(listing, platformIds, languageIds) {
   ].filter(Boolean).join('\n')
 
   const platformBriefs = platforms
-    .map((p) => `- "${p.id}" (${p.name}): ${p.style}`)
+    .map((p) => `- "${p.id}" (${p.name}): ${p.brief || p.style}`)
     .join('\n')
 
   const langList = languages
     .map((l) => `"${l.id}" = ${l.native}`)
     .join(', ')
 
-  return `You are an expert property copywriter for the Kuching, Sarawak market. You write native, natural marketing copy for property agents — never robotic, never machine-translated.
+  // Only spell out conventions for the languages actually requested.
+  const CONVENTIONS = {
+    en: '- English — confident, warm, professional. Contractions are fine; clean Malaysian-English is fine. Avoid stiff corporate phrasing.',
+    zh: '- 中文 — use real property vernacular: 售价/月租, X房X厕, 建筑面积◯平方尺, 永久地契/租赁地契, 家具齐全/部分家具. Sincere, trustworthy tone (诚意出售, 交通便利, 生活机能齐全, 环境清幽). WhatsApp/DM = 私信. Never sound translated.',
+    ms: '- Bahasa Malaysia — natural agent Malay: bilik tidur, bilik air/tandas, kaki persegi, pegangan bebas/pajakan, lengkap perabot, lokasi strategik, mesra keluarga. PM/WhatsApp untuk pertanyaan. Elakkan bahasa terjemahan yang kaku.',
+  }
+  const conventions = languages.map((l) => CONVENTIONS[l.id]).filter(Boolean).join('\n')
+
+  return `You are the property copywriter every agent in Kuching, Sarawak wishes they could hire. You write native, natural, high-converting marketing copy — never robotic, never machine-translated, never templated.
 
 LISTING FACTS:
 ${facts}
 
-Write marketing copy for EACH of these platforms, each in its own style:
+Write copy for EACH platform, in its own voice:
 ${platformBriefs}
 
-For EACH platform, produce the copy in EACH of these languages, written NATIVELY: ${langList}.
-CRITICAL: Do NOT translate one language into the others. Write each language from scratch with its own idiom, tone and property vernacular. A Chinese (中文) property post follows different conventions than an English one; Bahasa Malaysia copy should read like a local agent wrote it, not a translation.
+Produce EACH platform's copy in EACH language, written NATIVELY: ${langList}.
+CRITICAL: Do NOT translate one language into another. Write each from scratch in its own idiom — a 中文 post follows different conventions than an English one; Bahasa Malaysia must read like a local agent wrote it.
+NATIVE-LANGUAGE CONVENTIONS:
+${conventions}
 
-Guidelines:
-- Only use the facts given. Do not invent amenities, distances or figures. If a fact is missing, write around it.
-- Lead with the price where the platform style calls for it. Format money as RM.
-- Keep each piece ready to post — no placeholders, no "[insert here]".
-- Match each platform's length and tone brief above.
+CRAFT STANDARD — write like a real top agent, not a template:
+- Be specific and concrete. Use the real numbers and help the reader picture living there.
+- Vary sentence length. One strong opening line beats three flat ones.
+- BAN these clichés / AI tells: "nestled", "boasts", "dream home awaits", "won't last long", "a rare gem", "priced to sell", "look no further", "unparalleled", "boasts a".
+- Only use the facts above — never invent amenities, distances, schools or figures. If a fact is missing, write around it. Format money as RM.
+- Follow each platform's length, emoji and hashtag rules exactly. Hashtags ONLY on TikTok and Instagram — never on Facebook Page, Marketplace, Mudah or Portals.
+- End every piece with a clear, on-voice way to contact the agent (DM / WhatsApp / call). Ready to post: no placeholders, no "[insert]", no markdown.
 
 Return ONLY a JSON object — no markdown, no code fences, no commentary — shaped exactly like:
 {
