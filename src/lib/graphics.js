@@ -291,9 +291,11 @@ export function renderCarousel({ listing, brand, photos, logo }) {
         ctx.fillStyle = '#fff'; ctx.fillText(label, pad + 24, pad + 33)
 
         // Stacked bottom-left: price (hero), specs, then title above.
+        // Gaps are baseline-to-baseline; keep them larger than the font's cap
+        // height so the big price never crowds the specs line above it.
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
         ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 18
-        const priceBaseline = S - 184
+        const priceBaseline = S - 176
         ctx.font = '800 104px Inter, system-ui, sans-serif'; ctx.fillStyle = '#fff'
         ctx.fillText(formatPrice(listing.price, listing.listingType), pad, priceBaseline)
         const specs = [
@@ -301,11 +303,11 @@ export function renderCarousel({ listing, brand, photos, logo }) {
           listing.bathrooms != null && `${listing.bathrooms} bath`,
           listing.sqft != null && `${listing.sqft} sqft`,
         ].filter(Boolean).join('    ')
-        let sy = priceBaseline - 76
+        let sy = priceBaseline - 104
         if (specs) {
           ctx.font = '600 34px Inter, system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.92)'
-          ctx.fillText(specs, pad, sy); sy -= 56
-        } else sy -= 6
+          ctx.fillText(specs, pad, sy); sy -= 60
+        } else sy -= 10
         ctx.font = '700 44px Inter, system-ui, sans-serif'; ctx.fillStyle = '#fff'
         const title = wrapLines(ctx, listingLabel(listing), S - pad * 2)
         let ty = sy - (title.length - 1) * 52
