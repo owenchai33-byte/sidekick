@@ -44,12 +44,27 @@ export function newId() {
 // ── Showcase seeding ─────────────────────────────────────
 // Seeds example data once (first ever load). Clearing sets the seeded flag so
 // it won't re-appear; "reset" re-seeds on demand. Both live in Settings.
+// Bump SEED_VERSION when the showcase content changes (e.g. new demo photos) so
+// existing demo-only users refresh — but real listings are never clobbered.
+const SEED_VERSION = 2
+
 export async function ensureSeeded(buildShowcase) {
   const state = read()
-  // Only auto-seed a genuinely empty store — never clobber real data.
-  if (state.meta?.seeded || Object.keys(state.listings || {}).length > 0) return false
-  writeSeed(buildShowcase())
-  return true
+  const listings = Object.values(state.listings || {})
+
+  // First ever load — seed a genuinely empty store.
+  if (!state.meta?.seeded && listings.length === 0) {
+    writeSeed(buildShowcase())
+    return true
+  }
+  // Content refresh: if the store is still ALL example data and the seed
+  // version is behind, refresh the showcase. Never touches real listings.
+  const allExamples = listings.length > 0 && listings.every((l) => l.example)
+  if (state.meta?.seedVersion !== SEED_VERSION && allExamples) {
+    writeSeed(buildShowcase())
+    return true
+  }
+  return false
 }
 
 export async function resetShowcase(buildShowcase) {
@@ -67,7 +82,7 @@ function writeSeed({ listings, leads }) {
   const ldmap = {}
   for (const l of listings) lmap[l.id] = l
   for (const x of leads) ldmap[x.id] = x
-  localStorage.setItem(LKEY, JSON.stringify({ settings, listings: lmap, leads: ldmap, meta: { seeded: true } }))
+  localStorage.setItem(LKEY, JSON.stringify({ settings, listings: lmap, leads: ldmap, meta: { seeded: true, seedVersion: SEED_VERSION } }))
 }
 
 // ── Listings ─────────────────────────────────────────────

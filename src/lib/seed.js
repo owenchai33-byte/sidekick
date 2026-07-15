@@ -29,7 +29,7 @@ function makeListing(fields, platforms, opts = {}) {
     id,
     agentId: 'owner',
     ...fields,
-    photos: [],
+    photos: opts.photos || [],
     platforms,
     languages: LANGS,
     content,
@@ -66,19 +66,19 @@ export function buildShowcase() {
   const l1 = makeListing(
     { listingType: 'sale', price: 1280000, location: 'Green Heights', bedrooms: 5, bathrooms: 5, propertyType: 'Semi-D', sqft: 3200, tenure: 'Freehold', furnishing: 'Partially Furnished', title: 'Semi-D @ Green Heights' },
     ['facebook_page', 'marketplace', 'instagram'],
-    { approveAll: true, published: ['facebook_page', 'marketplace'], status: 'published', ageMins: 2880, updMins: 55, pubMins: 300 },
+    { approveAll: true, published: ['facebook_page', 'marketplace'], status: 'published', ageMins: 2880, updMins: 55, pubMins: 300, photos: ['seed/green-1.jpg', 'seed/green-3.jpg', 'seed/green-2.jpg'] },
   )
   // 2) High-value rental — flagged (> RM2k), approved, live on Marketplace.
   const l2 = makeListing(
     { listingType: 'rental', price: 2800, location: 'BDC', bedrooms: 3, bathrooms: 2, propertyType: 'Condo', sqft: 1150, furnishing: 'Fully Furnished', title: 'Condo @ BDC' },
     ['marketplace', 'mudah', 'facebook_page'],
-    { approveAll: true, published: ['marketplace'], status: 'published', ageMins: 1440, updMins: 190, pubMins: 600 },
+    { approveAll: true, published: ['marketplace'], status: 'published', ageMins: 1440, updMins: 190, pubMins: 600, photos: ['seed/condo-1.jpg', 'seed/condo-2.jpg', 'seed/condo-3.jpg'] },
   )
   // 3) Mid-market sale — generated, still in review (shows the approval stage).
   const l3 = makeListing(
     { listingType: 'sale', price: 620000, location: 'Batu Kawa', bedrooms: 4, bathrooms: 3, propertyType: 'Terrace', sqft: 1900, tenure: 'Freehold', title: 'Terrace @ Batu Kawa' },
     ['facebook_page', 'marketplace'],
-    { status: 'optimised', ageMins: 180, updMins: 25 },
+    { status: 'optimised', ageMins: 180, updMins: 25, photos: ['seed/terrace-1.jpg', 'seed/terrace-2.jpg', 'seed/terrace-3.jpg'] },
   )
 
   const leads = [
