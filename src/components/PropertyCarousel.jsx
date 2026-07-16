@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { loadImage, renderCarousel } from '../lib/graphics.js'
 import { makeZip, canvasToBytes } from '../lib/zip.js'
 import { listingLabel } from '../lib/format.js'
+import { canShare, shareFiles, canvasToFile } from '../lib/share.js'
 
 // A branded multi-slide carousel for Instagram / Facebook — cover, photo/spec
 // slides and a contact CTA. Previews one slide at a time; downloads all slides
@@ -50,7 +51,16 @@ export default function PropertyCarousel({ listing, brand }) {
     setTimeout(() => URL.revokeObjectURL(url), 4000)
   }
 
+  async function share() {
+    const base = slug(listingLabel(listing))
+    const files = await Promise.all(
+      canvasesRef.current.map((c, idx) => canvasToFile(c, `${base}-slide-${String(idx + 1).padStart(2, '0')}.jpg`)),
+    )
+    await shareFiles({ title: listingLabel(listing), text: listingLabel(listing), files })
+  }
+
   const n = slides.length
+  const shareable = canShare()
   return (
     <div className="pcar">
       <div className="pcar-stage">
@@ -69,12 +79,21 @@ export default function PropertyCarousel({ listing, brand }) {
           <button key={idx} className={idx === i ? 'on' : ''} onClick={() => setI(idx)} aria-label={`Go to slide ${idx + 1}`} />
         ))}
       </div>
-      <button className="btn btn-subtle btn-sm" onClick={download} disabled={!ready}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
-        Download carousel ({n})
-      </button>
+      <div className="pcar-actions">
+        <button className="btn btn-subtle btn-sm" onClick={download} disabled={!ready}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+          Download ({n})
+        </button>
+        {shareable && (
+          <button className="btn btn-primary btn-sm" onClick={share} disabled={!ready}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
+            Share ({n})
+          </button>
+        )}
+      </div>
       <style>{`
         .pcar { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+        .pcar-actions { display: flex; gap: 8px; }
         .pcar-stage { position: relative; width: 100%; max-width: 320px; aspect-ratio: 1 / 1; }
         .pcar-stage img, .pcar-skel { width: 100%; height: 100%; border-radius: 12px; display: block; box-shadow: var(--shadow-md); object-fit: cover; }
         .pcar-skel { background: var(--surface-sunk); }

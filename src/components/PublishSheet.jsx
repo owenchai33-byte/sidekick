@@ -10,7 +10,7 @@ import { canShare, sharePost } from '../lib/share.js'
 // The one-tap publish helper. Same three-step layout for EVERY platform so the
 // agent learns it once: copy the exact caption, save the photos/video, open the
 // platform and paste. Deliberately manual (no automation) to protect accounts.
-export default function PublishSheet({ platform, listing, lang, text, photos = [], videos = [], videoUrls = {}, onClose, onPublished, toast }) {
+export default function PublishSheet({ platform, listing, lang, text, photos = [], videos = [], videoUrls = {}, onClose, onPublished, toast, queue = null }) {
   const { settings } = useApp()
   const [copied, setCopied] = useState(false)
   const [waCopied, setWaCopied] = useState(false)
@@ -23,13 +23,17 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
 
   async function handleShare() {
     setSharing(true)
+    // Copy the caption up front (within the tap gesture). Facebook/Instagram
+    // drop shared text when photos are attached, so the agent pastes it in —
+    // apps that DO keep text (WhatsApp, Telegram) still get it from the payload.
+    copyText(text)
     try {
       const res = await sharePost({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, photos, base })
       if (res.ok) {
         onPublished?.()
-        toast?.(res.withFiles
-          ? `Shared with ${photos.length} photo${photos.length > 1 ? 's' : ''} — post it in the app`
-          : 'Caption shared — attach your photos & post', 'success')
+        toast?.(photos.length
+          ? 'Photos attached — caption copied, just paste it in'
+          : 'Caption copied — paste it into the post', 'success')
       } else if (res.reason === 'cancelled') {
         /* user backed out — do nothing */
       } else {
@@ -102,6 +106,13 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </button>
         </div>
 
+        {queue && (
+          <div className="ps-queue">
+            <div className="ps-queue-top">Posting everywhere <strong>· {queue.current} of {queue.total}</strong></div>
+            <div className="ps-queue-bar"><div style={{ width: `${(queue.current / queue.total) * 100}%` }} /></div>
+          </div>
+        )}
+
         {neverAuto && (
           <div className="ps-guard">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
@@ -115,7 +126,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
               {sharing ? 'Opening…' : (photos.length ? `Share caption + ${photos.length} photo${photos.length > 1 ? 's' : ''}` : 'Share caption')}
             </button>
-            <p className="ps-share-hint">Opens your phone's share menu → pick <strong>{platform.name}</strong>, and the caption{photos.length ? ' + photos are' : ' is'} already attached. Just hit post.</p>
+            <p className="ps-share-hint">Opens your share menu → pick <strong>{platform.name}</strong>.{photos.length ? ' Photos attach automatically; your caption’s copied — just tap the post box and paste.' : ' Your caption’s copied — paste it into the post.'}</p>
           </div>
         )}
 
@@ -174,6 +185,12 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
             <p className="ps-hint muted">Paste the caption{mediaCount ? ', attach your files' : ''}, and post.</p>
           </li>
         </ol>
+
+        {queue && (
+          <button className="btn btn-primary btn-block ps-next" onClick={queue.onNext}>
+            {queue.current < queue.total ? 'Done — next platform →' : 'Finish ✓'}
+          </button>
+        )}
       </div>
 
       <style>{`
@@ -207,6 +224,14 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
         .ps-wa-empty { font-size: 12.5px; color: var(--ink-500); line-height: 1.5; }
         .ps-wa-empty a { color: var(--green-700); font-weight: 700; }
         @media (prefers-color-scheme: dark) { .ps-wa-empty a { color: var(--green-400); } }
+
+        .ps-queue { margin-bottom: 16px; }
+        .ps-queue-top { font-size: 12.5px; color: var(--ink-500); margin-bottom: 7px; }
+        .ps-queue-top strong { color: var(--green-700); }
+        @media (prefers-color-scheme: dark) { .ps-queue-top strong { color: var(--green-400); } }
+        .ps-queue-bar { height: 6px; background: var(--surface-sunk); border-radius: 999px; overflow: hidden; }
+        .ps-queue-bar > div { height: 100%; background: var(--green-500); border-radius: 999px; transition: width 0.3s var(--ease); }
+        .ps-next { margin-top: 16px; padding: 14px; font-size: 15px; }
 
         .ps-share-block { margin-bottom: 14px; }
         .ps-share-btn { padding: 15px; font-size: 16px; }

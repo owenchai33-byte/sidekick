@@ -8,6 +8,7 @@ import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
 import PostCard from '../components/PostCard.jsx'
+import PublishSheet from '../components/PublishSheet.jsx'
 import PropertyGraphic from '../components/PropertyGraphic.jsx'
 import PropertyCarousel from '../components/PropertyCarousel.jsx'
 import PropertyVideo from '../components/PropertyVideo.jsx'
@@ -33,7 +34,22 @@ export default function ListingDetailPage() {
   const [editTargets, setEditTargets] = useState(false)
   const [graphicFormat, setGraphicFormat] = useState('square')
   const [kitBusy, setKitBusy] = useState(false)
+  const [queue, setQueue] = useState(null)
   const autoRan = useRef(false)
+
+  function startPostEverywhere() {
+    const plats = (listing.platforms || []).filter((p) => listing.content?.[p] && Object.keys(listing.content[p]).length)
+    if (!plats.length) return toast('Generate the copy first', 'warn')
+    setQueue({ platforms: plats, index: 0, lang: listing.languages[0] })
+  }
+  function advanceQueue() {
+    setQueue((q) => {
+      if (!q) return null
+      const next = q.index + 1
+      if (next >= q.platforms.length) { toast('Nice — you’ve gone through every platform 🎉', 'success'); return null }
+      return { ...q, index: next }
+    })
+  }
 
   async function handleDownloadKit() {
     setKitBusy(true)
@@ -219,6 +235,7 @@ export default function ListingDetailPage() {
           <span className="progress-label num">{stats.approved}/{stats.total} approved{stats.published ? ` · ${stats.published} published` : ''}</span>
         </div>
         <div className="row wrap" style={{ gap: 8 }}>
+          {hasContent && <button className="btn btn-primary btn-sm" onClick={startPostEverywhere}>Post everywhere</button>}
           {hasContent && <button className="btn btn-ghost btn-sm" onClick={approveAll} disabled={stats.approved === stats.total}>Approve all</button>}
           <button className="btn btn-subtle btn-sm" onClick={() => runGenerate()} disabled={generating}>
             {generating ? 'Generating…' : hasContent ? 'Regenerate' : 'Generate'}
@@ -302,6 +319,28 @@ export default function ListingDetailPage() {
       <div className="detail-foot">
         <button className="btn btn-ghost btn-sm danger-ghost" onClick={handleDelete}>Delete listing</button>
       </div>
+
+      {queue && (() => {
+        const pid = queue.platforms[queue.index]
+        const platform = PLATFORM_MAP[pid]
+        if (!platform) return null
+        const langMap = listing.content?.[pid] || {}
+        const lng = langMap[queue.lang] ? queue.lang : Object.keys(langMap)[0]
+        return (
+          <PublishSheet
+            platform={platform}
+            listing={listing}
+            lang={lng}
+            text={langMap[lng] || ''}
+            photos={listing.photos || []}
+            videos={listing.videos || []}
+            onClose={() => setQueue(null)}
+            onPublished={() => markPublished(pid, lng)}
+            toast={toast}
+            queue={{ current: queue.index + 1, total: queue.platforms.length, onNext: advanceQueue }}
+          />
+        )
+      })()}
 
       <style>{`
         .detail { display: flex; flex-direction: column; gap: 14px; }

@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer'
 import { formatPrice, listingLabel } from '../lib/format.js'
+import { canShare, shareFiles } from '../lib/share.js'
 
 // Generates a smooth, branded vertical Reel (9:16) from the listing.
 // One continuous slow zoom per photo (no jarring resets), text-only crossfades
@@ -278,6 +279,12 @@ export default function PropertyVideo({ listing, brand }) {
     document.body.appendChild(a); a.click(); a.remove()
   }
 
+  async function share() {
+    const blob = await fetch(url).then((r) => r.blob())
+    const file = new File([blob], `${listingLabel(listing).replace(/[^\w]+/g, '-').toLowerCase()}-reel.${ext}`, { type: blob.type || 'video/mp4' })
+    await shareFiles({ title: listingLabel(listing), text: listingLabel(listing), files: [file] })
+  }
+
   return (
     <div className="pvid">
       {url ? (
@@ -302,7 +309,13 @@ export default function PropertyVideo({ listing, brand }) {
         <button className="btn btn-primary btn-sm" onClick={generate} disabled={status === 'rendering'}>
           {status === 'rendering' ? 'Rendering…' : url ? 'Regenerate' : 'Generate video'}
         </button>
-        {url && <button className="btn btn-subtle btn-sm" onClick={download}>Download {ext.toUpperCase()}</button>}
+        {url && <button className="btn btn-subtle btn-sm" onClick={download}>Download</button>}
+        {url && canShare() && (
+          <button className="btn btn-primary btn-sm" onClick={share}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
+            Share
+          </button>
+        )}
       </div>
       {status === 'error' && <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Couldn't render the video in this browser. Try Chrome, or use the graphic instead.</p>}
       <style>{`

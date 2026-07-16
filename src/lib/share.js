@@ -40,3 +40,25 @@ export async function sharePost({ title, text, photos = [], base = 'listing' }) 
     return { ok: false, reason: (e && e.message) || 'failed' }
   }
 }
+
+// Share already-built File objects (e.g. canvas-generated graphics/slides, or a
+// video blob) straight to the OS share sheet.
+export async function shareFiles({ title, text, files = [] }) {
+  if (!canShare()) return { ok: false, reason: 'unsupported' }
+  const payload = { title, text }
+  const withFiles = files.length > 0 && !!navigator.canShare && navigator.canShare({ files })
+  if (withFiles) payload.files = files
+  try {
+    await navigator.share(payload)
+    return { ok: true, withFiles }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return { ok: false, reason: 'cancelled' }
+    return { ok: false, reason: (e && e.message) || 'failed' }
+  }
+}
+
+export function canvasToFile(canvas, name, type = 'image/jpeg', quality = 0.92) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(new File([blob], name, { type })), type, quality)
+  })
+}
