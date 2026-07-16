@@ -5,6 +5,7 @@ import { getVideoBlob } from '../lib/media.js'
 import { copyText } from '../lib/clipboard.js'
 import { useApp } from '../context/AppContext.jsx'
 import { waEnquiryLink } from '../lib/whatsapp.js'
+import { canShare, sharePost } from '../lib/share.js'
 
 // The one-tap publish helper. Same three-step layout for EVERY platform so the
 // agent learns it once: copy the exact caption, save the photos/video, open the
@@ -13,10 +14,31 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
   const { settings } = useApp()
   const [copied, setCopied] = useState(false)
   const [waCopied, setWaCopied] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const base = (listing?.title || listing?.location || 'listing').replace(/[^\w]+/g, '-').toLowerCase()
   const mediaCount = photos.length + videos.length
   const neverAuto = platform.autopost === 'never'
   const waLink = waEnquiryLink(settings?.brand?.phone, listing, platform.name)
+  const nativeShare = canShare()
+
+  async function handleShare() {
+    setSharing(true)
+    try {
+      const res = await sharePost({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, photos, base })
+      if (res.ok) {
+        onPublished?.()
+        toast?.(res.withFiles
+          ? `Shared with ${photos.length} photo${photos.length > 1 ? 's' : ''} — post it in the app`
+          : 'Caption shared — attach your photos & post', 'success')
+      } else if (res.reason === 'cancelled') {
+        /* user backed out — do nothing */
+      } else {
+        toast?.('Sharing not available here — use the steps below', 'warn')
+      }
+    } finally {
+      setSharing(false)
+    }
+  }
 
   async function copyWa() {
     const ok = await copyText(waLink)
@@ -87,6 +109,16 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </div>
         )}
 
+        {nativeShare && (
+          <div className="ps-share-block">
+            <button className="btn btn-primary btn-block ps-share-btn" onClick={handleShare} disabled={sharing}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
+              {sharing ? 'Opening…' : (photos.length ? `Share caption + ${photos.length} photo${photos.length > 1 ? 's' : ''}` : 'Share caption')}
+            </button>
+            <p className="ps-share-hint">Opens your phone's share menu → pick <strong>{platform.name}</strong>, and the caption{photos.length ? ' + photos are' : ' is'} already attached. Just hit post.</p>
+          </div>
+        )}
+
         {waLink ? (
           <div className="ps-wa">
             <div className="ps-wa-title">📲 Your trackable WhatsApp link</div>
@@ -100,6 +132,8 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
             📲 Add your WhatsApp number in <Link to="/settings" onClick={onClose}>Settings → Brand kit</Link> to get a trackable enquiry link for every post.
           </div>
         )}
+
+        {nativeShare && <div className="ps-or">or post it step-by-step</div>}
 
         <ol className="ps-steps">
           <li className="ps-step">
@@ -173,6 +207,13 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
         .ps-wa-empty { font-size: 12.5px; color: var(--ink-500); line-height: 1.5; }
         .ps-wa-empty a { color: var(--green-700); font-weight: 700; }
         @media (prefers-color-scheme: dark) { .ps-wa-empty a { color: var(--green-400); } }
+
+        .ps-share-block { margin-bottom: 14px; }
+        .ps-share-btn { padding: 15px; font-size: 16px; }
+        .ps-share-hint { font-size: 12px; color: var(--ink-500); text-align: center; margin: 9px 6px 0; line-height: 1.45; }
+        .ps-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px;
+          font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-400); }
+        .ps-or::before, .ps-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
         .ps-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
         .ps-step-head { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 700; margin-bottom: 9px; }
