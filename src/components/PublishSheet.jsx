@@ -5,7 +5,7 @@ import { getVideoBlob } from '../lib/media.js'
 import { copyText } from '../lib/clipboard.js'
 import { useApp } from '../context/AppContext.jsx'
 import { waEnquiryLink } from '../lib/whatsapp.js'
-import { canShare, sharePost } from '../lib/share.js'
+import { canShare, sharePost, shareFiles } from '../lib/share.js'
 
 // The one-tap publish helper. Same three-step layout for EVERY platform so the
 // agent learns it once: copy the exact caption, save the photos/video, open the
@@ -20,20 +20,37 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
   const neverAuto = platform.autopost === 'never'
   const waLink = waEnquiryLink(settings?.brand?.phone, listing, platform.name)
   const nativeShare = canShare()
+  // Video-first platforms want the Reel, not photos. Only if one's been made.
+  const useVideo = videos.length > 0 && (platform.id === 'tiktok' || platform.id === 'instagram')
+  const shareLabel = sharing
+    ? 'Opening…'
+    : useVideo ? 'Share your Reel video'
+    : photos.length ? `Share caption + ${photos.length} photo${photos.length > 1 ? 's' : ''}`
+    : 'Share caption'
 
   async function handleShare() {
     setSharing(true)
-    // Copy the caption up front (within the tap gesture). Facebook/Instagram
-    // drop shared text when photos are attached, so the agent pastes it in —
-    // apps that DO keep text (WhatsApp, Telegram) still get it from the payload.
+    // Copy the caption up front (within the tap gesture). Facebook/Instagram/
+    // TikTok don't carry shared text when media is attached, so the agent pastes
+    // it — apps that DO keep text (WhatsApp/Telegram) still get it from the payload.
     copyText(text)
     try {
-      const res = await sharePost({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, photos, base })
+      let res
+      if (useVideo) {
+        const blob = await getVideoBlob(videos[0].id)
+        if (blob) {
+          const file = new File([blob], videos[0].name || `${base}-reel.mp4`, { type: blob.type || 'video/mp4' })
+          res = await shareFiles({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, files: [file] })
+        } else {
+          res = await sharePost({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, photos, base })
+        }
+      } else {
+        res = await sharePost({ title: `${listing?.title || 'Listing'} — ${platform.name}`, text, photos, base })
+      }
       if (res.ok) {
         onPublished?.()
-        toast?.(photos.length
-          ? 'Photos attached — caption copied, just paste it in'
-          : 'Caption copied — paste it into the post', 'success')
+        const mediaWord = useVideo ? 'Reel attached' : photos.length ? 'Photos attached' : 'Ready'
+        toast?.(`${mediaWord} — caption copied, just paste it in`, 'success')
       } else if (res.reason === 'cancelled') {
         /* user backed out — do nothing */
       } else {
@@ -124,9 +141,17 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           <div className="ps-share-block">
             <button className="btn btn-primary btn-block ps-share-btn" onClick={handleShare} disabled={sharing}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
-              {sharing ? 'Opening…' : (photos.length ? `Share caption + ${photos.length} photo${photos.length > 1 ? 's' : ''}` : 'Share caption')}
+              {shareLabel}
             </button>
-            <p className="ps-share-hint">Opens your share menu → pick <strong>{platform.name}</strong>.{photos.length ? ' Photos attach automatically; your caption’s copied — just tap the post box and paste.' : ' Your caption’s copied — paste it into the post.'}</p>
+            <p className="ps-share-hint">
+              Opens your share menu → pick <strong>{platform.name}</strong>.{' '}
+              {useVideo
+                ? 'Your Reel attaches; caption’s copied — just paste it and post.'
+                : photos.length
+                  ? 'Photos attach automatically; caption’s copied — just tap the post box and paste.'
+                  : 'Your caption’s copied — paste it into the post.'}
+              {platform.id === 'tiktok' && !videos.length && <><br /><span className="ps-share-note">Tip: generate the Reel first so it attaches to TikTok.</span></>}
+            </p>
           </div>
         )}
 
@@ -236,6 +261,8 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
         .ps-share-block { margin-bottom: 14px; }
         .ps-share-btn { padding: 15px; font-size: 16px; }
         .ps-share-hint { font-size: 12px; color: var(--ink-500); text-align: center; margin: 9px 6px 0; line-height: 1.45; }
+        .ps-share-note { color: var(--timber-700); font-weight: 600; display: inline-block; margin-top: 4px; }
+        @media (prefers-color-scheme: dark) { .ps-share-note { color: var(--timber-300); } }
         .ps-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px;
           font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-400); }
         .ps-or::before, .ps-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }

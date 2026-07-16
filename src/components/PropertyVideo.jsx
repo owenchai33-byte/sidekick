@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer'
 import { formatPrice, listingLabel } from '../lib/format.js'
 import { canShare, shareFiles } from '../lib/share.js'
+import { putVideo, getVideoUrl } from '../lib/media.js'
 
 // Generates a smooth, branded vertical Reel (9:16) from the listing.
 // One continuous slow zoom per photo (no jarring resets), text-only crossfades
@@ -177,13 +178,24 @@ function render(ctx, t, beats, D) {
   else if (t > D.total - 350) { ctx.save(); ctx.globalAlpha = clamp((t - (D.total - 350)) / 350); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore() }
 }
 
-export default function PropertyVideo({ listing, brand }) {
+export default function PropertyVideo({ listing, brand, onVideo }) {
   const [status, setStatus] = useState('idle')
   const [progress, setProgress] = useState(0)
   const [url, setUrl] = useState(null)
   const [ext, setExt] = useState('mp4')
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
+
+  // Load a previously-saved reel (persisted to IndexedDB) so it survives reloads
+  // and is available to the publish flow / kit.
+  useEffect(() => {
+    const v = listing.videos?.[0]
+    if (!v) return
+    getVideoUrl(v.id).then((u) => {
+      if (u && mounted.current) { setUrl(u); if (v.name?.endsWith('webm')) setExt('webm'); setStatus('done') }
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing.id])
 
   // Dev-only: draw a single frame at time `sec` to a visible canvas (bypasses
   // the encoder) so frames can be inspected. Stripped from production builds.
@@ -223,6 +235,9 @@ export default function PropertyVideo({ listing, brand }) {
       else { const r = await recordRealtime(canvas, ctx, beats, total, D); blob = r.blob; extension = r.ext }
       if (!mounted.current || !blob) return
       setUrl(URL.createObjectURL(blob)); setExt(extension); setStatus('done')
+      // Persist the reel so the publish flow can attach it (TikTok / IG / Status).
+      const slug = listingLabel(listing).replace(/[^\w]+/g, '-').toLowerCase()
+      putVideo(blob).then((id) => { if (mounted.current) onVideo?.({ id, name: `${slug}-reel.${extension}` }) }).catch(() => {})
     } catch {
       if (mounted.current) setStatus('error')
     }

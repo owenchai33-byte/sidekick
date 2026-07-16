@@ -276,7 +276,7 @@ export default function ListingDetailPage() {
           </div>
           <div className="asset">
             <div className="asset-label">Reel video</div>
-            <PropertyVideo listing={listing} brand={settings.brand} />
+            <PropertyVideo listing={listing} brand={settings.brand} onVideo={(v) => patch((l) => ({ ...l, videos: [v] }))} />
           </div>
         </div>
       </section>
