@@ -19,7 +19,11 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
   const mediaCount = photos.length + videos.length
   const neverAuto = platform.autopost === 'never'
   const waLink = waEnquiryLink(settings?.brand?.phone, listing, platform.name)
-  const nativeShare = canShare()
+  // Native share only helps platforms that have a real app to receive it
+  // (Facebook, Instagram, TikTok). Marketplace / Mudah / portals are web forms
+  // with no share target — sharing there would land in the wrong place, so they
+  // stay on the manual copy-and-open flow.
+  const shareSupported = canShare() && ['facebook_page', 'instagram', 'tiktok'].includes(platform.id)
   // Video-first platforms want the Reel, not photos. Only if one's been made.
   const useVideo = videos.length > 0 && (platform.id === 'tiktok' || platform.id === 'instagram')
   const shareLabel = sharing
@@ -137,7 +141,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </div>
         )}
 
-        {nativeShare && (
+        {shareSupported && (
           <div className="ps-share-block">
             <button className="btn btn-primary btn-block ps-share-btn" onClick={handleShare} disabled={sharing}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
@@ -169,7 +173,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </div>
         )}
 
-        {nativeShare && <div className="ps-or">or post it step-by-step</div>}
+        {shareSupported && <div className="ps-or">or post it step-by-step</div>}
 
         <ol className="ps-steps">
           <li className="ps-step">
