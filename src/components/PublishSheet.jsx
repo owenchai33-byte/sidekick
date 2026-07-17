@@ -5,7 +5,7 @@ import { getVideoBlob } from '../lib/media.js'
 import { copyText } from '../lib/clipboard.js'
 import { useApp } from '../context/AppContext.jsx'
 import { waEnquiryLink } from '../lib/whatsapp.js'
-import { canShare, sharePost, shareFiles } from '../lib/share.js'
+import { shareToApps, sharePost, shareFiles } from '../lib/share.js'
 
 // The one-tap publish helper. Same three-step layout for EVERY platform so the
 // agent learns it once: copy the exact caption, save the photos/video, open the
@@ -23,7 +23,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
   // (Facebook, Instagram, TikTok). Marketplace / Mudah / portals are web forms
   // with no share target — sharing there would land in the wrong place, so they
   // stay on the manual copy-and-open flow.
-  const shareSupported = canShare() && ['facebook_page', 'instagram', 'tiktok'].includes(platform.id)
+  const shareSupported = shareToApps() && ['facebook_page', 'instagram', 'tiktok'].includes(platform.id)
   // Video-first platforms want the Reel, not photos. Only if one's been made.
   const useVideo = videos.length > 0 && (platform.id === 'tiktok' || platform.id === 'instagram')
   const shareLabel = sharing
@@ -113,6 +113,17 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
     toast?.(`${platform.name} opened — paste & post`, 'success')
   }
 
+  // Desktop one-click: caption to clipboard + download the media + open the
+  // platform, all at once. Can't auto-attach files into another site (browser
+  // security), so the agent drags the downloaded files in and pastes.
+  async function handleAssist() {
+    copyText(text)
+    if (mediaCount) await downloadAll()
+    window.open(platform.compose, '_blank', 'noopener')
+    onPublished?.()
+    toast?.(`${platform.name} opened — caption copied${mediaCount ? ` & ${mediaCount} file${mediaCount > 1 ? 's' : ''} downloaded` : ''}`, 'success')
+  }
+
   return (
     <div className="ps-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={`Publish to ${platform.name}`}>
       <div className="ps-sheet" onClick={(e) => e.stopPropagation()}>
@@ -141,7 +152,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </div>
         )}
 
-        {shareSupported && (
+        {shareSupported ? (
           <div className="ps-share-block">
             <button className="btn btn-primary btn-block ps-share-btn" onClick={handleShare} disabled={sharing}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
@@ -155,6 +166,16 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
                   ? 'Photos attach automatically; caption’s copied — just tap the post box and paste.'
                   : 'Your caption’s copied — paste it into the post.'}
               {platform.id === 'tiktok' && !videos.length && <><br /><span className="ps-share-note">Tip: generate the Reel first so it attaches to TikTok.</span></>}
+            </p>
+          </div>
+        ) : (
+          <div className="ps-share-block">
+            <button className="btn btn-primary btn-block ps-share-btn" onClick={handleAssist}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
+              Copy caption + open {platform.name}
+            </button>
+            <p className="ps-share-hint">
+              One click: your caption’s copied{mediaCount ? `, ${mediaCount} file${mediaCount > 1 ? 's' : ''} downloaded` : ''}, and {platform.name} opens.{mediaCount ? ' Drag the file' + (mediaCount > 1 ? 's' : '') + ' in and paste the caption.' : ' Paste the caption.'}
             </p>
           </div>
         )}
@@ -173,7 +194,7 @@ export default function PublishSheet({ platform, listing, lang, text, photos = [
           </div>
         )}
 
-        {shareSupported && <div className="ps-or">or post it step-by-step</div>}
+        <div className="ps-or">or do it step-by-step</div>
 
         <ol className="ps-steps">
           <li className="ps-step">

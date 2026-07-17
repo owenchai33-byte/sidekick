@@ -7,6 +7,14 @@ export function canShare() {
   return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 }
 
+// Native share is only *useful* on a touch device (phone/tablet), where the OS
+// share sheet actually lists social apps like Facebook / Instagram / TikTok. On
+// a Mac/PC the sheet only offers AirDrop / Mail / Notes — no social apps — so we
+// fall back to the manual copy + download + open flow there instead.
+export function shareToApps() {
+  return canShare() && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0
+}
+
 async function urlToFile(src, name) {
   const res = await fetch(src)
   const blob = await res.blob()

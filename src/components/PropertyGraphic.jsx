@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { listingLabel } from '../lib/format.js'
 import { loadImage, renderGraphicCanvas } from '../lib/graphics.js'
-import { canShare, shareFiles, canvasToFile } from '../lib/share.js'
+import { shareToApps, shareFiles, canvasToFile } from '../lib/share.js'
 
 // Renders the branded single-image "property card" (square/portrait/story) via
 // the shared graphics lib and exports a full-resolution PNG. The drawing logic
@@ -34,7 +34,7 @@ export default function PropertyGraphic({ listing, brand, format = 'square', chi
   }, [key])
 
   const slug = listingLabel(listing).replace(/[^\w]+/g, '-').toLowerCase()
-  const shareable = canShare()
+  const shareable = shareToApps()
 
   function download() {
     canvasRef.current.toBlob((blob) => {

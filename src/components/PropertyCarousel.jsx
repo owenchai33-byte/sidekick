@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { loadImage, renderCarousel } from '../lib/graphics.js'
 import { makeZip, canvasToBytes } from '../lib/zip.js'
 import { listingLabel } from '../lib/format.js'
-import { canShare, shareFiles, canvasToFile } from '../lib/share.js'
+import { shareToApps, shareFiles, canvasToFile } from '../lib/share.js'
 
 // A branded multi-slide carousel for Instagram / Facebook — cover, photo/spec
 // slides and a contact CTA. Previews one slide at a time; downloads all slides
@@ -60,7 +60,7 @@ export default function PropertyCarousel({ listing, brand }) {
   }
 
   const n = slides.length
-  const shareable = canShare()
+  const shareable = shareToApps()
   return (
     <div className="pcar">
       <div className="pcar-stage">
