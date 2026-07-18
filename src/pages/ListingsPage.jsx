@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { evaluateRules } from '../lib/rules.js'
 import { listingLabel, relativeTime } from '../lib/format.js'
+import { coverPhoto } from '../lib/photos.js'
 import PriceTag from '../components/PriceTag.jsx'
 
 function statusOf(l) {
@@ -50,13 +51,7 @@ export default function ListingsPage() {
             const st = statusOf(l)
             return (
               <button key={l.id} className="lcard card" onClick={() => navigate(`/listing/${l.id}`)}>
-                {l.photos?.[0] ? (
-                  <img className="lcard-photo" src={l.photos[0]} alt="" />
-                ) : (
-                  <div className="lcard-photo lcard-noimg" aria-hidden="true">
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5" /></svg>
-                  </div>
-                )}
+                <img className="lcard-photo" src={coverPhoto(l)} alt="" />
                 <div className="lcard-body">
                   <div className="lcard-top">
                     <span className={`badge ${st.cls}`}>{st.label}</span>

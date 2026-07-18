@@ -3,6 +3,7 @@ import { LANGUAGE_MAP } from '../../shared/constants.js'
 import PostPreview from './PostPreview.jsx'
 import PublishSheet from './PublishSheet.jsx'
 import { useVideoUrls } from './MediaUploader.jsx'
+import { listingPhotos } from '../lib/photos.js'
 import { copyText } from '../lib/clipboard.js'
 
 // One listing shown per platform, tabbed across EN / 中文 / BM. Two views:
@@ -30,7 +31,7 @@ export default function PostCard({
   const isApproved = !!approvals[lang]
   const publishedAt = published[lang]
   const neverAuto = platform.autopost === 'never'
-  const photos = listing?.photos || []
+  const photos = listingPhotos(listing)
   const videos = listing?.videos || []
   const videoUrls = useVideoUrls(videos)
   const coverVideoUrl = videos[0] ? videoUrls[videos[0].id] : null

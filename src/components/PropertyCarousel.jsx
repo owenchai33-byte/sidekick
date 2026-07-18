@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { loadImage, renderCarousel } from '../lib/graphics.js'
 import { makeZip, canvasToBytes } from '../lib/zip.js'
 import { listingLabel } from '../lib/format.js'
+import { listingPhotos } from '../lib/photos.js'
 import { shareToApps, shareFiles, canvasToFile } from '../lib/share.js'
 
 // A branded multi-slide carousel for Instagram / Facebook — cover, photo/spec
@@ -18,14 +19,14 @@ export default function PropertyCarousel({ listing, brand }) {
   const key = JSON.stringify([
     listing.id, listing.price, listing.listingType, listing.location, listing.propertyType,
     listing.bedrooms, listing.bathrooms, listing.sqft, listing.tenure, listing.furnishing,
-    (listing.photos || []).slice(0, 4).map((p) => p?.slice(0, 40)),
+    listingPhotos(listing).slice(0, 4).map((p) => p?.slice(0, 40)),
     brand.agency, brand.name, brand.phone, brand.color, brand.logo?.slice(0, 40),
   ])
 
   useEffect(() => {
     let alive = true
     setReady(false); setI(0)
-    Promise.all([loadImage(brand.logo), ...(listing.photos || []).slice(0, 4).map(loadImage)]).then((loaded) => {
+    Promise.all([loadImage(brand.logo), ...listingPhotos(listing).slice(0, 4).map(loadImage)]).then((loaded) => {
       if (!alive) return
       const logo = loaded[0]
       const photos = loaded.slice(1)

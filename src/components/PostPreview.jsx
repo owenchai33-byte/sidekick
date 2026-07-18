@@ -1,4 +1,5 @@
 import { formatPrice, listingLabel } from '../lib/format.js'
+import { coverPhoto } from '../lib/photos.js'
 
 // Renders the generated copy as it will actually look on each platform, so an
 // agent (and a prospect) sees the finished post, not text in a box. Four visual
@@ -12,7 +13,7 @@ function PhotoBlock({ listing, ratio, videoUrl, videoMode }) {
       ? <video className="pv-photo" src={videoUrl} style={style} autoPlay muted loop playsInline />
       : <video className="pv-photo" src={videoUrl} style={style} controls muted playsInline />
   }
-  const src = listing.photos?.[0]
+  const src = coverPhoto(listing)
   if (src) return <img className="pv-photo" src={src} alt="" style={style} />
   const emoji = listing.listingType === 'rental' ? '🔑' : '🏠'
   return (

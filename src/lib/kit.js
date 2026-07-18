@@ -5,6 +5,7 @@
 import { loadImage, renderGraphicCanvas, renderCarousel } from './graphics.js'
 import { makeZip, canvasToBytes, textBytes } from './zip.js'
 import { formatPrice, listingLabel } from './format.js'
+import { listingPhotos } from './photos.js'
 import { PLATFORM_MAP, LANGUAGES } from '../../shared/constants.js'
 
 function slug(s) {
@@ -15,7 +16,7 @@ export async function buildKit({ listing, brand }) {
   const files = []
   const base = slug(listingLabel(listing))
 
-  const loaded = await Promise.all([loadImage(brand.logo), ...(listing.photos || []).slice(0, 4).map(loadImage)])
+  const loaded = await Promise.all([loadImage(brand.logo), ...listingPhotos(listing).slice(0, 4).map(loadImage)])
   const logo = loaded[0]
   const photos = loaded.slice(1)
 

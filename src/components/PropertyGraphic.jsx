@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { listingLabel } from '../lib/format.js'
 import { loadImage, renderGraphicCanvas } from '../lib/graphics.js'
+import { coverPhoto } from '../lib/photos.js'
 import { shareToApps, shareFiles, canvasToFile } from '../lib/share.js'
 
 // Renders the branded single-image "property card" (square/portrait/story) via
@@ -12,14 +13,14 @@ export default function PropertyGraphic({ listing, brand, format = 'square', chi
   const [ready, setReady] = useState(false)
   const key = JSON.stringify([
     listing.id, listing.price, listing.listingType, listing.location, listing.propertyType,
-    listing.bedrooms, listing.bathrooms, listing.sqft, listing.photos?.[0]?.slice(0, 60),
+    listing.bedrooms, listing.bathrooms, listing.sqft, coverPhoto(listing)?.slice(0, 60),
     brand.agency, brand.name, brand.phone, brand.color, !!brand.logo, brand.logo?.slice(0, 40), format,
   ])
 
   useEffect(() => {
     let alive = true
     setReady(false)
-    Promise.all([loadImage(listing.photos?.[0]), loadImage(brand.logo)]).then(([photo, logo]) => {
+    Promise.all([loadImage(coverPhoto(listing)), loadImage(brand.logo)]).then(([photo, logo]) => {
       if (!alive) return
       const c = canvasRef.current
       if (!c) return

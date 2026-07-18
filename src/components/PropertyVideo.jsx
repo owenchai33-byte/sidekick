@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer'
 import { formatPrice, listingLabel } from '../lib/format.js'
+import { listingPhotos } from '../lib/photos.js'
 import { shareToApps, shareFiles } from '../lib/share.js'
 import { putVideo, getVideoUrl } from '../lib/media.js'
 
@@ -14,10 +15,10 @@ const H = 1920
 const OUT_W = 720       // encoded output
 const OUT_H = 1280
 const FPS = 30
-const INTRO = 2600
+const INTRO = 2800
 const BEAT = 2100
-const OUTRO = 2800
-const TR = 650          // crossfade overlap
+const OUTRO = 3000
+const TR = 680          // crossfade overlap
 const MAX_PHOTOS = 8
 
 async function pickCodec() {
@@ -61,14 +62,66 @@ function coverDraw(ctx, img, zoom, panX, panY) {
   let sy = clamp(maxY * (0.5 + panY * 0.5), 0, maxY)
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H)
 }
-function text(ctx, str, x, y, font, fill, alpha, align = 'left') {
+// ---- easing + colour helpers -------------------------------------------------
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3)
+const easeInCubic = (t) => t * t * t
+const easeOutBack = (t) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2) }
+const smooth = (t) => t * t * (3 - 2 * t)
+function mix(a, b, t) {
+  const pa = parseInt(String(a).replace('#', ''), 16), pb = parseInt(String(b).replace('#', ''), 16)
+  const r = Math.round(lerp((pa >> 16) & 255, (pb >> 16) & 255, t))
+  const g = Math.round(lerp((pa >> 8) & 255, (pb >> 8) & 255, t))
+  const bl = Math.round(lerp(pa & 255, pb & 255, t))
+  return `rgb(${r},${g},${bl})`
+}
+// A bright mint accent derived from the brand colour — pops on dark photos.
+function accentOf(color) { return mix(color || '#2d6a4f', '#a9f0ce', 0.5) }
+
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2))
+  ctx.beginPath()
+  ctx.moveTo(x + rr, y)
+  ctx.arcTo(x + w, y, x + w, y + h, rr)
+  ctx.arcTo(x + w, y + h, x, y + h, rr)
+  ctx.arcTo(x, y + h, x, y, rr)
+  ctx.arcTo(x, y, x + w, y, rr)
+  ctx.closePath()
+}
+
+// Low-level text — composes with the group alpha already on the context.
+function label(ctx, str, x, y, font, fill, alpha, align = 'left', tracking = 0) {
   if (!str || alpha <= 0.01) return
   ctx.save()
-  ctx.globalAlpha = clamp(alpha)
-  ctx.translate(0, (1 - clamp(alpha)) * 22)
+  ctx.globalAlpha = clamp(alpha) * ctx.globalAlpha
   ctx.font = font; ctx.fillStyle = fill; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'
-  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 22
+  if (tracking) ctx.letterSpacing = tracking + 'px'
+  ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 2
   ctx.fillText(str, x, y)
+  ctx.restore()
+}
+
+// Shrink a font until the string fits maxW (keeps long words / prices on-canvas).
+function fitFont(ctx, str, weight, maxPx, maxW) {
+  let px = maxPx
+  ctx.font = `${weight} ${px}px Inter, sans-serif`
+  while (ctx.measureText(str).width > maxW && px > 42) { px -= 4; ctx.font = `${weight} ${px}px Inter, sans-serif` }
+  return `${weight} ${px}px Inter, sans-serif`
+}
+
+// A centred outlined pill (e.g. FOR SALE) with an optional pop scale.
+function pill(ctx, cx, cy, str, font, tracking, textColor, alpha, scale = 1) {
+  if (alpha <= 0.01) return
+  ctx.save()
+  ctx.globalAlpha = clamp(alpha) * ctx.globalAlpha
+  ctx.translate(cx, cy); ctx.scale(scale, scale)
+  ctx.font = font; ctx.letterSpacing = tracking + 'px'
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const w = ctx.measureText(str).width + 60, h = 62
+  roundRect(ctx, -w / 2, -h / 2, w, h, h / 2)
+  ctx.fillStyle = 'rgba(8,20,15,0.35)'; ctx.fill()
+  ctx.lineWidth = 2.5; ctx.strokeStyle = textColor; ctx.stroke()
+  ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14
+  ctx.fillStyle = textColor; ctx.fillText(str, 0, 2)
   ctx.restore()
 }
 
@@ -102,80 +155,182 @@ function buildBeats(listing, photos) {
   return { beats, total: beats[beats.length - 1].end }
 }
 
-function drawBg(ctx, beat, t, D) {
+function drawBg(ctx, beat, t, D, pop = 0) {
   const img = beat.photoIdx >= 0 ? D.photos[beat.photoIdx] : null
   if (img) {
-    const rp = clamp((t - beat.runStart) / Math.max(1, beat.runEnd - beat.runStart))
-    const dir = beat.runIdx % 2 === 0 ? 1 : -1
-    coverDraw(ctx, img, lerp(1.05, 1.15, rp), lerp(-0.14 * dir, 0.14 * dir, rp), 0)
+    // Continuous, multi-directional Ken Burns: each photo run alternates a slow
+    // zoom-in / zoom-out and drifts along its own diagonal; smoothstep keeps the
+    // motion from starting or stopping abruptly at run edges.
+    const rp = smooth(clamp((t - beat.runStart) / Math.max(1, beat.runEnd - beat.runStart)))
+    const seed = beat.runIdx
+    const zoom = (seed % 2 === 0 ? lerp(1.05, 1.19, rp) : lerp(1.19, 1.05, rp)) * (1 + 0.06 * pop)
+    const dirX = (seed % 3) - 1
+    const dirY = ((seed >> 1) % 3) - 1 || 1
+    coverDraw(ctx, img, zoom, lerp(-0.13 * dirX, 0.13 * dirX, rp), lerp(-0.09 * dirY, 0.09 * dirY, rp))
   } else {
     const g = ctx.createLinearGradient(0, 0, W, H)
-    g.addColorStop(0, shade(D.color, 26)); g.addColorStop(1, shade(D.color, -54))
+    g.addColorStop(0, shade(D.color, 30)); g.addColorStop(1, shade(D.color, -60))
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    const rg = ctx.createRadialGradient(W / 2, H * 0.4, 100, W / 2, H * 0.4, H * 0.7)
+    rg.addColorStop(0, 'rgba(255,255,255,0.12)'); rg.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H)
   }
   if (beat.kind === 'stat') {
-    const g = ctx.createLinearGradient(0, H * 0.48, 0, H)
+    const g = ctx.createLinearGradient(0, H * 0.42, 0, H)
     g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.9)')
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
   } else {
-    ctx.fillStyle = 'rgba(0,0,0,0.42)'; ctx.fillRect(0, 0, W, H)
+    ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fillRect(0, 0, W, H)
     const g = ctx.createLinearGradient(0, H * 0.5, 0, H)
     g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)')
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
   }
 }
 
-function drawText(ctx, beat, alpha, D) {
-  const { listing, brand } = D
-  if (beat.kind === 'intro') {
-    text(ctx, listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE', W / 2, H / 2 - 150, '700 44px Inter, sans-serif', 'rgba(255,255,255,0.95)', alpha, 'center')
-    text(ctx, formatPrice(listing.price, listing.listingType), W / 2, H / 2 + 20, '800 130px Inter, sans-serif', '#fff', alpha, 'center')
-    text(ctx, [listing.propertyType, listing.location].filter(Boolean).join(' · '), W / 2, H / 2 + 100, '500 42px Inter, sans-serif', 'rgba(255,255,255,0.92)', alpha, 'center')
-  } else if (beat.kind === 'outro') {
-    text(ctx, 'Book a viewing', W / 2, H / 2 - 60, '800 82px Inter, sans-serif', '#fff', alpha, 'center')
-    text(ctx, formatPrice(listing.price, listing.listingType), W / 2, H / 2 + 20, '700 56px Inter, sans-serif', 'rgba(255,255,255,0.92)', alpha, 'center')
-    if (brand.name || brand.agency) text(ctx, brand.name || brand.agency, W / 2, H / 2 + 96, '600 42px Inter, sans-serif', 'rgba(255,255,255,0.92)', alpha, 'center')
-    if (brand.phone) text(ctx, 'WhatsApp ' + brand.phone, W / 2, H / 2 + 158, '700 46px Inter, sans-serif', '#fff', alpha, 'center')
-  } else {
-    text(ctx, beat.big, 60, H - 210, '800 128px Inter, sans-serif', '#fff', alpha)
-    if (beat.small) text(ctx, beat.small, 66, H - 210 + 56, '600 44px Inter, sans-serif', 'rgba(255,255,255,0.9)', alpha)
+// Cinematic depth: darken corners + a soft top scrim so the story bar stays legible.
+function vignette(ctx) {
+  const g = ctx.createRadialGradient(W / 2, H * 0.42, H * 0.28, W / 2, H * 0.52, H * 0.78)
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.32)')
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+  const tg = ctx.createLinearGradient(0, 0, 0, H * 0.16)
+  tg.addColorStop(0, 'rgba(0,0,0,0.34)'); tg.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.16)
+}
+
+// Instagram/TikTok-style segmented progress across the top — one segment per beat.
+function storyBar(ctx, beats, t) {
+  const padX = 54, top = 60, gap = 8, h = 7, n = beats.length
+  const seg = (W - padX * 2 - gap * (n - 1)) / n
+  for (let i = 0; i < n; i++) {
+    const x = padX + i * (seg + gap)
+    const spanEnd = beats[i + 1] ? beats[i + 1].start : beats[n - 1].end
+    const f = clamp((t - beats[i].start) / Math.max(1, spanEnd - beats[i].start))
+    roundRect(ctx, x, top, seg, h, h / 2); ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fill()
+    if (f > 0) { roundRect(ctx, x, top, seg * f, h, h / 2); ctx.fillStyle = '#fff'; ctx.fill() }
+  }
+}
+
+// One scene's foreground, with a group fade + horizontal slide applied on top of
+// each element's own staggered spring-style entrance (rise from `beat.start`).
+function drawScene(ctx, beat, t, groupAlpha, slideX, D, A) {
+  if (groupAlpha <= 0.01) return
+  ctx.save()
+  ctx.globalAlpha = clamp(groupAlpha)
+  ctx.translate(slideX, 0)
+  const since = t - beat.start
+  const rise = (delay, dur = 540) => {
+    const p = clamp((since - delay) / dur)
+    return { a: p, y: (1 - easeOutCubic(p)) * 34, s: lerp(0.9, 1, easeOutBack(p)) }
+  }
+  if (beat.kind === 'intro') introScene(ctx, beat, D, A, rise)
+  else if (beat.kind === 'outro') outroScene(ctx, beat, D, A, rise)
+  else statScene(ctx, beat, D, A, rise)
+  ctx.restore()
+}
+
+function introScene(ctx, beat, D, A, rise) {
+  const { listing } = D, cx = W / 2
+  const a = rise(0, 460), b = rise(140, 560), c = rise(300, 560)
+  pill(ctx, cx, H / 2 - 214 + a.y, listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE', '800 38px Inter, sans-serif', 3, A, a.a, a.s)
+  ctx.save(); ctx.translate(0, b.y)
+  label(ctx, formatPrice(listing.price, listing.listingType), cx, H / 2 + 20, fitFont(ctx, formatPrice(listing.price, listing.listingType), 800, 132, W - 140), '#fff', b.a, 'center')
+  ctx.restore()
+  // accent underline draws out from centre
+  ctx.save(); ctx.globalAlpha = b.a * ctx.globalAlpha
+  const uw = lerp(0, 132, easeOutCubic(b.a))
+  roundRect(ctx, cx - uw / 2, H / 2 + 54, uw, 6, 3); ctx.fillStyle = A; ctx.fill()
+  ctx.restore()
+  ctx.save(); ctx.translate(0, c.y)
+  label(ctx, [listing.propertyType, listing.location].filter(Boolean).join('   ·   '), cx, H / 2 + 122, '500 42px Inter, sans-serif', 'rgba(255,255,255,0.92)', c.a, 'center')
+  ctx.restore()
+}
+
+function statScene(ctx, beat, D, A, rise) {
+  const baseY = H - 250
+  const a = rise(0, 520), b = rise(130, 560)
+  // accent bar grows up from the number's baseline
+  ctx.save(); ctx.globalAlpha = a.a * ctx.globalAlpha
+  const barH = 150 * clamp(easeOutCubic(a.a))
+  roundRect(ctx, 60, baseY + 30 - barH, 10, barH, 5); ctx.fillStyle = A; ctx.fill()
+  ctx.restore()
+  ctx.save(); ctx.translate(0, a.y)
+  label(ctx, beat.big, 96, baseY, fitFont(ctx, beat.big, 800, 132, W - 200), '#fff', a.a, 'left')
+  ctx.restore()
+  if (beat.small) {
+    ctx.save(); ctx.translate(0, b.y)
+    label(ctx, beat.small.toUpperCase(), 100, baseY + 54, '700 40px Inter, sans-serif', A, b.a, 'left', 2)
+    ctx.restore()
+  }
+}
+
+function outroScene(ctx, beat, D, A, rise) {
+  const { listing, brand } = D, cx = W / 2
+  const a = rise(0, 480), b = rise(130, 540), c = rise(280, 560)
+  ctx.save(); ctx.translate(0, a.y)
+  label(ctx, 'Book a viewing', cx, H / 2 - 70, '800 84px Inter, sans-serif', '#fff', a.a, 'center')
+  ctx.restore()
+  ctx.save(); ctx.translate(0, b.y)
+  label(ctx, formatPrice(listing.price, listing.listingType), cx, H / 2 + 6, fitFont(ctx, formatPrice(listing.price, listing.listingType), 700, 56, W - 160), 'rgba(255,255,255,0.92)', b.a, 'center')
+  ctx.restore()
+  if (brand.phone) {
+    ctx.save(); ctx.globalAlpha = c.a * ctx.globalAlpha
+    ctx.translate(cx, H / 2 + 116 + c.y); ctx.scale(c.s, c.s)
+    ctx.font = '700 44px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    const txt = 'WhatsApp  ' + brand.phone
+    const w = ctx.measureText(txt).width + 96, h = 84
+    roundRect(ctx, -w / 2, -h / 2, w, h, h / 2)
+    ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.fillStyle = A; ctx.fill()
+    ctx.shadowBlur = 0; ctx.fillStyle = mix(D.color, '#06140d', 0.4); ctx.fillText(txt, 0, 2)
+    ctx.restore()
+  } else if (brand.name || brand.agency) {
+    ctx.save(); ctx.translate(0, c.y)
+    label(ctx, brand.name || brand.agency, cx, H / 2 + 120, '600 46px Inter, sans-serif', A, c.a, 'center')
+    ctx.restore()
   }
 }
 
 function brandBar(ctx, D) {
   const { brand, logo, color } = D
-  const barH = 132, by = H - barH
-  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, by, W, barH)
-  const ms = 76, mx = 56, my = by + (barH - ms) / 2
+  const barH = 128, by = H - barH
+  const g = ctx.createLinearGradient(0, by, 0, H)
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.4, 'rgba(0,0,0,0.28)'); g.addColorStop(1, 'rgba(0,0,0,0.5)')
+  ctx.fillStyle = g; ctx.fillRect(0, by, W, barH)
+  const ms = 74, mx = 56, my = by + (barH - ms) / 2 + 6
   if (logo) { ctx.save(); ctx.beginPath(); ctx.arc(mx + ms / 2, my + ms / 2, ms / 2, 0, 7); ctx.clip(); ctx.drawImage(logo, mx, my, ms, ms); ctx.restore() }
   else { ctx.beginPath(); ctx.arc(mx + ms / 2, my + ms / 2, ms / 2, 0, 7); ctx.fillStyle = color; ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = '800 30px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(initials(brand.agency || brand.name), mx + ms / 2, my + ms / 2 + 1) }
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.font = '700 34px Inter, sans-serif'
-  ctx.fillText(brand.agency || brand.name || 'SideKick Property', mx + ms + 22, by + barH / 2)
+  ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 10
+  ctx.fillText(brand.agency || brand.name || 'SideKick Property', mx + ms + 22, my + ms / 2 + 1)
 }
 
 function render(ctx, t, beats, D) {
+  const A = D.accent || (D.accent = accentOf(D.color))
   const active = beats.filter((b) => t >= b.start && t < b.end).slice(0, 2)
   const cur = active[0] || beats[beats.length - 1]
   const nxt = active[1]
   const trRaw = nxt ? clamp((t - nxt.start) / TR) : 0
+  const tr = easeInOut(trRaw)
 
   // Background: crossfade only when the photo actually changes; otherwise the
-  // shared photo stays continuous and only the text transitions.
-  drawBg(ctx, cur, t, D)
+  // shared photo stays continuous. Incoming photo gets a subtle settle-pop zoom.
+  drawBg(ctx, cur, t, D, 0)
   if (nxt && nxt.photoIdx !== cur.photoIdx) {
-    ctx.save(); ctx.globalAlpha = easeInOut(trRaw); drawBg(ctx, nxt, t, D); ctx.restore()
+    ctx.save(); ctx.globalAlpha = tr; drawBg(ctx, nxt, t, D, 1 - tr); ctx.restore()
   }
-  // Staggered text: outgoing fades out over the first half of the transition,
-  // incoming fades in over the second half — so captions never overlap in place.
-  let curAlpha = nxt ? clamp(1 - trRaw * 2) : 1
-  if (cur.start === 0) curAlpha *= clamp(t / 450) // intro entrance
-  drawText(ctx, cur, curAlpha, D)
-  if (nxt) drawText(ctx, nxt, clamp(trRaw * 2 - 1), D)
+  vignette(ctx)
+
+  // Staggered, directional captions: current exits (fade + slide left) while the
+  // next enters (fade + slide in from the right) — they never overlap in place.
+  const outA = nxt ? clamp(1 - trRaw * 1.7) : 1
+  drawScene(ctx, cur, t, outA, nxt ? -70 * easeInCubic(trRaw) : 0, D, A)
+  if (nxt) drawScene(ctx, nxt, t, clamp(trRaw * 1.7 - 0.4), 80 * (1 - easeOutCubic(trRaw)), D, A)
+
+  storyBar(ctx, beats, t)
   brandBar(ctx, D)
 
   // Cinematic open / close.
-  if (t < 350) { ctx.save(); ctx.globalAlpha = 1 - t / 350; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore() }
-  else if (t > D.total - 350) { ctx.save(); ctx.globalAlpha = clamp((t - (D.total - 350)) / 350); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore() }
+  if (t < 360) { ctx.save(); ctx.globalAlpha = 1 - t / 360; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore() }
+  else if (t > D.total - 420) { ctx.save(); ctx.globalAlpha = clamp((t - (D.total - 420)) / 420); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore() }
 }
 
 export default function PropertyVideo({ listing, brand, onVideo }) {
@@ -202,7 +357,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     window.__pvidFrame = async (sec) => {
-      const photos = (await Promise.all((listing.photos || []).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
+      const photos = (await Promise.all(listingPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
       const logo = await loadImage(brand.logo)
       const { beats, total } = buildBeats(listing, photos)
       const D = { listing, brand, photos, logo, color: brand.color || '#2d6a4f', total }
@@ -218,7 +373,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
   async function generate() {
     setStatus('rendering'); setProgress(0); setUrl(null)
     try {
-      const photos = (await Promise.all((listing.photos || []).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
+      const photos = (await Promise.all(listingPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
       const logo = await loadImage(brand.logo)
       const color = brand.color || '#2d6a4f'
       const { beats, total } = buildBeats(listing, photos)

@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext.jsx'
 import { generateContent } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
+import { listingPhotos } from '../lib/photos.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
@@ -186,14 +187,17 @@ export default function ListingDetailPage() {
 
       {/* Summary header */}
       <header className="summary card">
-        {listing.photos?.length > 0 && (
-          <div
-            className={`summary-photos${listing.photos.length === 1 ? ' single' : ''}`}
-            style={{ gridTemplateColumns: `repeat(${Math.min(listing.photos.length, 4)}, 1fr)` }}
-          >
-            {listing.photos.slice(0, 4).map((src, i) => <img key={i} src={src} alt="" />)}
-          </div>
-        )}
+        {(() => {
+          const photos = listingPhotos(listing)
+          return (
+            <div
+              className={`summary-photos${photos.length === 1 ? ' single' : ''}`}
+              style={{ gridTemplateColumns: `repeat(${Math.min(photos.length, 4)}, 1fr)` }}
+            >
+              {photos.slice(0, 4).map((src, i) => <img key={i} src={src} alt="" />)}
+            </div>
+          )
+        })()}
         <div className="summary-body">
           <div className="summary-top">
             <div>
@@ -332,7 +336,7 @@ export default function ListingDetailPage() {
             listing={listing}
             lang={lng}
             text={langMap[lng] || ''}
-            photos={listing.photos || []}
+            photos={listingPhotos(listing)}
             videos={listing.videos || []}
             onClose={() => setQueue(null)}
             onPublished={() => markPublished(pid, lng)}
