@@ -5,6 +5,7 @@ import { generateContent } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
 import { listingPhotos } from '../lib/photos.js'
+import { postToSocial, captionFor } from '../lib/social.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
@@ -36,7 +37,23 @@ export default function ListingDetailPage() {
   const [graphicFormat, setGraphicFormat] = useState('square')
   const [kitBusy, setKitBusy] = useState(false)
   const [queue, setQueue] = useState(null)
+  const [autoPosting, setAutoPosting] = useState(false)
   const autoRan = useRef(false)
+
+  // One-tap auto-post to FB Page + IG via the Make.com pipe (no Meta app).
+  async function autoPost() {
+    const caption = captionFor(listing, 'facebook_page')
+    if (!caption) return toast('Generate the copy first', 'warn')
+    setAutoPosting(true)
+    try {
+      const r = await postToSocial({ caption, listing, platforms: 'facebook,instagram' })
+      toast(r.imageUrl ? 'Posted to Facebook + Instagram 🎉' : 'Posted (text only — photo hosting is the next step) 🎉', 'success')
+    } catch (e) {
+      toast('Auto-post failed: ' + e.message, 'danger')
+    } finally {
+      setAutoPosting(false)
+    }
+  }
 
   function startPostEverywhere() {
     const plats = (listing.platforms || []).filter((p) => listing.content?.[p] && Object.keys(listing.content[p]).length)
@@ -240,6 +257,7 @@ export default function ListingDetailPage() {
         </div>
         <div className="row wrap" style={{ gap: 8 }}>
           {hasContent && <button className="btn btn-primary btn-sm" onClick={startPostEverywhere}>Post everywhere</button>}
+          {hasContent && <button className="btn btn-ghost btn-sm" onClick={autoPost} disabled={autoPosting}>{autoPosting ? 'Posting…' : 'Auto-post FB + IG'}</button>}
           {hasContent && <button className="btn btn-ghost btn-sm" onClick={approveAll} disabled={stats.approved === stats.total}>Approve all</button>}
           <button className="btn btn-subtle btn-sm" onClick={() => runGenerate()} disabled={generating}>
             {generating ? 'Generating…' : hasContent ? 'Regenerate' : 'Generate'}

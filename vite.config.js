@@ -9,21 +9,25 @@ function devApi(env) {
     name: 'sidekick-dev-api',
     apply: 'serve',
     configureServer(server) {
-      // Expose non-VITE_ env to the handler (which reads process.env at call time)
-      for (const key of ['AI_PROVIDER', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_MODEL', 'ANTHROPIC_MODEL']) {
+      // Expose non-VITE_ env to the handlers (which read process.env at call time)
+      for (const key of ['AI_PROVIDER', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_MODEL', 'ANTHROPIC_MODEL', 'MAKE_WEBHOOK_URL']) {
         if (env[key]) process.env[key] = env[key]
       }
-      server.middlewares.use('/api/generate', async (req, res) => {
-        try {
-          const mod = await server.ssrLoadModule('/api/generate.js')
-          await mod.default(req, res)
-        } catch (err) {
-          server.config.logger.error('[dev-api] ' + (err?.stack || err))
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: 'Dev API error: ' + (err?.message || String(err)) }))
-        }
-      })
+      // Mount each serverless handler at /api/<name>, same as Vercel does in prod.
+      const mount = (name) =>
+        server.middlewares.use(`/api/${name}`, async (req, res) => {
+          try {
+            const mod = await server.ssrLoadModule(`/api/${name}.js`)
+            await mod.default(req, res)
+          } catch (err) {
+            server.config.logger.error('[dev-api] ' + (err?.stack || err))
+            res.statusCode = 500
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ error: 'Dev API error: ' + (err?.message || String(err)) }))
+          }
+        })
+      mount('generate')
+      mount('social-post')
     },
   }
 }
