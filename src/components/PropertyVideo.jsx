@@ -460,8 +460,8 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
     await shareFiles({ title: listingLabel(listing), text: listingLabel(listing), files: [file] })
   }
 
-  // One-tap: host the Reel on Blob → post it as a video via Make (FB Page today;
-  // Instagram Reel once that leg is wired). Only offered for mp4 — FB/IG reject webm.
+  // One-tap: host the Reel on Blob → post it as a video. Facebook goes via Make,
+  // TikTok via Zernio (public, no audit). Only offered for mp4 — FB/TikTok reject webm.
   async function postReel() {
     const caption = captionFor(listing, 'facebook_page')
     if (!caption) return toast('Generate the copy first', 'warn')
@@ -471,8 +471,9 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
       const blob = await fetch(url).then((r) => r.blob())
       const name = `${listingLabel(listing).replace(/[^\w]+/g, '-').toLowerCase()}-reel.${ext}`
       const mediaUrl = await uploadMedia(blob, name)
-      await postToSocial({ caption, mediaUrl, mediaType: 'video', platforms: 'facebook,instagram' })
-      toast('Reel posted to Facebook 🎉', 'success')
+      const r = await postToSocial({ caption, mediaUrl, mediaType: 'video', platforms: 'facebook,tiktok' })
+      if (r.errors?.length) toast('Posted with issues — ' + r.errors.join(' · '), 'warn')
+      else toast('Reel posted to Facebook + TikTok 🎉', 'success')
     } catch (e) {
       toast('Post failed: ' + e.message, 'danger')
     } finally {
@@ -514,7 +515,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
         {url && ext === 'mp4' && (
           <button className="btn btn-primary btn-sm" onClick={postReel} disabled={posting}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
-            {posting ? 'Posting…' : 'Post to FB + IG'}
+            {posting ? 'Posting…' : 'Post to FB + TikTok'}
           </button>
         )}
       </div>
