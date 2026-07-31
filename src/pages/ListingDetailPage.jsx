@@ -47,7 +47,7 @@ export default function ListingDetailPage() {
     setAutoPosting(true)
     try {
       const r = await postToSocial({ caption, listing, platforms: 'facebook,instagram' })
-      toast(r.imageUrl ? 'Posted to Facebook + Instagram 🎉' : 'Posted (text only — photo hosting is the next step) 🎉', 'success')
+      toast(r.mediaUrl ? 'Posted photo to Facebook + Instagram 🎉' : 'Posted (text only — add a photo to reach Instagram) 🎉', 'success')
     } catch (e) {
       toast('Auto-post failed: ' + e.message, 'danger')
     } finally {

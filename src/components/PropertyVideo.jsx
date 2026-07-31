@@ -4,6 +4,9 @@ import { formatPrice, listingLabel } from '../lib/format.js'
 import { listingPhotos } from '../lib/photos.js'
 import { shareToApps, shareFiles } from '../lib/share.js'
 import { putVideo, getVideoUrl } from '../lib/media.js'
+import { postToSocial, captionFor } from '../lib/social.js'
+import { uploadMedia } from '../lib/upload.js'
+import { useApp } from '../context/AppContext.jsx'
 
 // Generates a smooth, branded vertical Reel (9:16) from the listing.
 // One continuous slow zoom per photo (no jarring resets), text-only crossfades
@@ -334,10 +337,12 @@ function render(ctx, t, beats, D) {
 }
 
 export default function PropertyVideo({ listing, brand, onVideo }) {
+  const { toast } = useApp()
   const [status, setStatus] = useState('idle')
   const [progress, setProgress] = useState(0)
   const [url, setUrl] = useState(null)
   const [ext, setExt] = useState('mp4')
+  const [posting, setPosting] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -455,6 +460,26 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
     await shareFiles({ title: listingLabel(listing), text: listingLabel(listing), files: [file] })
   }
 
+  // One-tap: host the Reel on Blob → post it as a video via Make (FB Page today;
+  // Instagram Reel once that leg is wired). Only offered for mp4 — FB/IG reject webm.
+  async function postReel() {
+    const caption = captionFor(listing, 'facebook_page')
+    if (!caption) return toast('Generate the copy first', 'warn')
+    if (!url) return toast('Generate the Reel first', 'warn')
+    setPosting(true)
+    try {
+      const blob = await fetch(url).then((r) => r.blob())
+      const name = `${listingLabel(listing).replace(/[^\w]+/g, '-').toLowerCase()}-reel.${ext}`
+      const mediaUrl = await uploadMedia(blob, name)
+      await postToSocial({ caption, mediaUrl, mediaType: 'video', platforms: 'facebook,instagram' })
+      toast('Reel posted to Facebook 🎉', 'success')
+    } catch (e) {
+      toast('Post failed: ' + e.message, 'danger')
+    } finally {
+      setPosting(false)
+    }
+  }
+
   return (
     <div className="pvid">
       {url ? (
@@ -481,9 +506,15 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
         </button>
         {url && <button className="btn btn-subtle btn-sm" onClick={download}>Download</button>}
         {url && shareToApps() && (
-          <button className="btn btn-primary btn-sm" onClick={share}>
+          <button className="btn btn-subtle btn-sm" onClick={share}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>
             Share
+          </button>
+        )}
+        {url && ext === 'mp4' && (
+          <button className="btn btn-primary btn-sm" onClick={postReel} disabled={posting}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+            {posting ? 'Posting…' : 'Post to FB + IG'}
           </button>
         )}
       </div>
@@ -500,7 +531,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
         @media (prefers-color-scheme: dark) { .pvid-progress-label { color: var(--green-400); } }
         .pvid-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--green-600); animation: pvid-spin 0.8s linear infinite; }
         @keyframes pvid-spin { to { transform: rotate(360deg); } }
-        .pvid-actions { display: flex; gap: 8px; }
+        .pvid-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
       `}</style>
     </div>
   )

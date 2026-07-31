@@ -35,7 +35,11 @@ export default async function handler(req, res) {
   let body
   try { body = await readJson(req) } catch { return send(res, 400, { error: 'Invalid JSON' }) }
   const caption = (body?.caption || '').trim()
-  const imageUrl = body?.imageUrl || ''
+  const mediaUrl = body?.mediaUrl || body?.imageUrl || ''
+  const mediaType = body?.mediaType || (mediaUrl ? 'image' : 'text')
+  // `imageUrl` is kept for the current FB "Upload a Photo" module; `mediaUrl` +
+  // `mediaType` drive the Make Router (photo vs Reel) once it's added.
+  const imageUrl = mediaType === 'image' ? mediaUrl : (body?.imageUrl || '')
   const platforms = body?.platforms || 'facebook,instagram'
   if (!caption) return send(res, 400, { error: 'caption is required' })
 
@@ -43,7 +47,7 @@ export default async function handler(req, res) {
     const r = await fetch(hook, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ caption, imageUrl, platforms }),
+      body: JSON.stringify({ caption, imageUrl, mediaUrl, mediaType, platforms }),
     })
     const text = await r.text().catch(() => '')
     if (!r.ok) return send(res, 502, { error: `Make returned ${r.status}: ${text.slice(0, 200)}` })
