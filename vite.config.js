@@ -32,6 +32,7 @@ function devApi(env) {
       mount('social-connect')
       mount('social-accounts')
       mount('social-broadcast')
+      mount('social-disconnect')
     },
   }
 }

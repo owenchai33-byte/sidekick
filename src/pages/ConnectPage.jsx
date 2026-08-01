@@ -55,6 +55,23 @@ export default function ConnectPage() {
     } catch (e) { setError(e.message); setBusy('') }
   }
 
+  async function disconnect(acct) {
+    if (!window.confirm(`Disconnect @${acct.username} (${acct.platform})? You can reconnect anytime.`)) return
+    setBusy(acct.platform)
+    setError('')
+    try {
+      const r = await fetch('/api/social-disconnect', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: acct.id }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Disconnect failed')
+      await load()
+    } catch (e) { setError(e.message) }
+    finally { setBusy('') }
+  }
+
   async function sendTestPost() {
     setTesting(true)
     setTestResult('')
@@ -98,13 +115,15 @@ export default function ConnectPage() {
                   <div className="connect-status muted">{p.blurb}</div>
                 )}
               </div>
-              <button
-                className={`btn btn-sm ${acct ? 'btn-subtle' : 'btn-primary'}`}
-                onClick={() => connect(p.id)}
-                disabled={busy === p.id || accounts === null}
-              >
-                {busy === p.id ? 'Opening…' : acct ? 'Reconnect' : 'Connect'}
-              </button>
+              {acct ? (
+                <button className="btn btn-sm btn-subtle" onClick={() => disconnect(acct)} disabled={busy === p.id}>
+                  {busy === p.id ? 'Working…' : 'Disconnect'}
+                </button>
+              ) : (
+                <button className="btn btn-sm btn-primary" onClick={() => connect(p.id)} disabled={busy === p.id || accounts === null}>
+                  {busy === p.id ? 'Opening…' : 'Connect'}
+                </button>
+              )}
             </div>
           )
         })}
