@@ -10,7 +10,7 @@ function devApi(env) {
     apply: 'serve',
     configureServer(server) {
       // Expose non-VITE_ env to the handlers (which read process.env at call time)
-      for (const key of ['AI_PROVIDER', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_MODEL', 'ANTHROPIC_MODEL', 'MAKE_WEBHOOK_URL', 'BLOB_READ_WRITE_TOKEN', 'ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID']) {
+      for (const key of ['AI_PROVIDER', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_MODEL', 'ANTHROPIC_MODEL', 'MAKE_WEBHOOK_URL', 'BLOB_READ_WRITE_TOKEN', 'ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'ZERNIO_PROFILE_ID']) {
         if (env[key]) process.env[key] = env[key]
       }
       // Mount each serverless handler at /api/<name>, same as Vercel does in prod.
@@ -29,6 +29,9 @@ function devApi(env) {
       mount('generate')
       mount('social-post')
       mount('media-upload')
+      mount('social-connect')
+      mount('social-accounts')
+      mount('social-broadcast')
     },
   }
 }

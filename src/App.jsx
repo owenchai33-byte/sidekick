@@ -6,6 +6,7 @@ import NewListingPage from './pages/NewListingPage.jsx'
 import ListingDetailPage from './pages/ListingDetailPage.jsx'
 import PipelinePage from './pages/PipelinePage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+import ConnectPage from './pages/ConnectPage.jsx'
 
 export default function App() {
   const { loading } = useApp()
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/new" element={<NewListingPage />} />
           <Route path="/listing/:id" element={<ListingDetailPage />} />
           <Route path="/pipeline" element={<PipelinePage />} />
+          <Route path="/connect" element={<ConnectPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
