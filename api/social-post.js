@@ -49,8 +49,10 @@ async function postToMake({ caption, imageUrl, mediaUrl, mediaType, platforms })
 // account; per-agent account ids come later for the multi-agent rollout.
 async function postToZernio({ caption, mediaUrl, mediaType }) {
   const key = process.env.ZERNIO_API_KEY
-  const accountId = process.env.ZERNIO_TIKTOK_ACCOUNT_ID
-  if (!key || !accountId) return { ok: false, error: 'Zernio not connected (ZERNIO_API_KEY / ZERNIO_TIKTOK_ACCOUNT_ID)' }
+  // Pilot: default to the connected TikTok account so only ZERNIO_API_KEY must
+  // be configured. Per-agent account ids come with the multi-agent rollout.
+  const accountId = process.env.ZERNIO_TIKTOK_ACCOUNT_ID || '6a6c49fbdf17280d930993f0'
+  if (!key) return { ok: false, error: 'Zernio not connected — set ZERNIO_API_KEY in Vercel' }
   if (!mediaUrl) return { ok: false, error: 'TikTok needs a video' }
   try {
     const r = await fetch('https://zernio.com/api/v1/posts', {
