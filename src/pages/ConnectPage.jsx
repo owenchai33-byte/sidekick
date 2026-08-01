@@ -41,8 +41,24 @@ export default function ConnectPage() {
     } catch (e) { setError(e.message); setAccounts([]) }
   }, [])
 
-  // Loads on mount — also runs when the agent lands back here after authorizing.
-  useEffect(() => { load() }, [load])
+  // Loads on mount, and again whenever the agent returns to the page (e.g. back
+  // from the OAuth redirect). A just-connected account can take a few seconds to
+  // register on Zernio, so also poll briefly — no tab-switch needed to see it.
+  useEffect(() => {
+    load()
+    let tries = 0
+    const poll = setInterval(() => { load(); if (++tries >= 5) clearInterval(poll) }, 2500)
+    const refetch = () => { if (!document.hidden) load() }
+    window.addEventListener('focus', refetch)
+    document.addEventListener('visibilitychange', refetch)
+    window.addEventListener('pageshow', refetch)
+    return () => {
+      clearInterval(poll)
+      window.removeEventListener('focus', refetch)
+      document.removeEventListener('visibilitychange', refetch)
+      window.removeEventListener('pageshow', refetch)
+    }
+  }, [load])
 
   async function connect(platform) {
     setBusy(platform)
