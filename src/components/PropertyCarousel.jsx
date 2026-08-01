@@ -17,7 +17,7 @@ export default function PropertyCarousel({ listing, brand }) {
   const [i, setI] = useState(0)
   const [ready, setReady] = useState(false)
   const key = JSON.stringify([
-    listing.id, listing.price, listing.listingType, listing.location, listing.propertyType,
+    listing.id, listing.price, listing.listingType, listing.marketStatus, listing.location, listing.propertyType,
     listing.bedrooms, listing.bathrooms, listing.sqft, listing.tenure, listing.furnishing,
     listingPhotos(listing).slice(0, 4).map((p) => p?.slice(0, 40)),
     brand.agency, brand.name, brand.phone, brand.color, brand.logo?.slice(0, 40),

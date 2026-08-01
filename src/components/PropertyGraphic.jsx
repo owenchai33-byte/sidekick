@@ -12,7 +12,7 @@ export default function PropertyGraphic({ listing, brand, format = 'square', chi
   const canvasRef = useRef(null)
   const [ready, setReady] = useState(false)
   const key = JSON.stringify([
-    listing.id, listing.price, listing.listingType, listing.location, listing.propertyType,
+    listing.id, listing.price, listing.listingType, listing.marketStatus, listing.location, listing.propertyType,
     listing.bedrooms, listing.bathrooms, listing.sqft, coverPhoto(listing)?.slice(0, 60),
     brand.agency, brand.name, brand.phone, brand.color, !!brand.logo, brand.logo?.slice(0, 40), format,
   ])

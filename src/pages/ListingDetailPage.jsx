@@ -6,6 +6,7 @@ import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
 import { listingPhotos } from '../lib/photos.js'
 import { postToSocial, captionFor } from '../lib/social.js'
+import { MARKET_STATUSES, isHighlightStatus } from '../lib/marketStatus.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
@@ -218,11 +219,18 @@ export default function ListingDetailPage() {
         <div className="summary-body">
           <div className="summary-top">
             <div>
-              <div className="row wrap" style={{ gap: 8, marginBottom: 6 }}>
+              <div className="row wrap" style={{ gap: 8, marginBottom: 6, alignItems: 'center' }}>
                 <span className="badge badge-neutral">{listing.listingType === 'rental' ? 'Rental' : 'Sale'}</span>
                 {rule.flagged && <span className="badge badge-flag">Flagged</span>}
                 {listing.example && <span className="badge badge-example">Example</span>}
                 {demo && <span className="badge badge-demo">Sample copy</span>}
+                <label className="status-pick">
+                  <span>Status</span>
+                  <select value={listing.marketStatus || 'available'} onChange={(e) => patch((l) => ({ ...l, marketStatus: e.target.value }))}>
+                    {MARKET_STATUSES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                </label>
+                {isHighlightStatus(listing) && <span className="muted" style={{ fontSize: 12 }}>graphic updated ✓</span>}
               </div>
               <h1>{listingLabel(listing)}</h1>
               <p className="summary-specs muted">
@@ -366,6 +374,8 @@ export default function ListingDetailPage() {
 
       <style>{`
         .detail { display: flex; flex-direction: column; gap: 14px; }
+        .status-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-500); }
+        .status-pick select { font: inherit; color: var(--ink-900); background: var(--surface-sunk); border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 10px; cursor: pointer; -webkit-appearance: none; appearance: none; }
 
         .summary { overflow: hidden; }
         .summary-photos { display: grid; gap: 3px; background: var(--line); }

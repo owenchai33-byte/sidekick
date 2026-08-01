@@ -3,6 +3,7 @@
 // Pure canvas, no dependencies, no cost. Used by PropertyGraphic, the carousel,
 // and the "Download whole kit" bundler so every asset shares one visual system.
 import { formatPrice, listingLabel } from './format.js'
+import { statusBanner } from './marketStatus.js'
 
 export const SIZES = { square: [1080, 1080], story: [1080, 1920], portrait: [1080, 1350] }
 
@@ -111,13 +112,14 @@ export function drawCard(ctx, W, H, listing, brand, photo, logo) {
   ctx.fillStyle = top
   ctx.fillRect(0, 0, W, 240)
 
-  const label = listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE'
+  const banner = statusBanner(listing)
+  const label = banner ? banner.text : (listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE')
   ctx.font = '700 34px Inter, system-ui, sans-serif'
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'left'
   const bw = ctx.measureText(label).width + 48
   roundRect(ctx, pad, pad, bw, 62, 31)
-  ctx.fillStyle = color
+  ctx.fillStyle = banner ? banner.color : color
   ctx.fill()
   ctx.fillStyle = '#fff'
   ctx.fillText(label, pad + 24, pad + 33)
