@@ -4,6 +4,7 @@
 
 import { listingPhotos } from './photos.js'
 import { uploadMedia, dataUrlToBlob } from './upload.js'
+import { isHighlightStatus, statusCaption } from './marketStatus.js'
 
 // Make/Facebook/Instagram fetch the image over the internet, so it needs an
 // ABSOLUTE, publicly-reachable URL. Relative seed paths resolve against the
@@ -26,6 +27,12 @@ async function coverImageUrl(listing) {
 // Pick the best caption for a listing: the given platform/lang, else the first
 // generated copy available.
 export function captionFor(listing, platformId = 'facebook_page', lang) {
+  // A market-status change (Sold / Price Reduced / …) leads with its native
+  // status caption instead of the standard listing pitch.
+  if (isHighlightStatus(listing)) {
+    const sc = statusCaption(listing, lang || listing?.languages?.[0] || 'en')
+    if (sc) return sc
+  }
   const byPlatform = listing?.content?.[platformId] || {}
   const chosen = (lang && byPlatform[lang]) || byPlatform.en || byPlatform[Object.keys(byPlatform)[0]]
   if (chosen) return chosen

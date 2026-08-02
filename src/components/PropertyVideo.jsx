@@ -505,7 +505,6 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
         <button className="btn btn-primary btn-sm" onClick={generate} disabled={status === 'rendering'}>
           {status === 'rendering' ? 'Rendering…' : url ? 'Regenerate' : 'Generate video'}
         </button>
-        {url && <button className="btn btn-subtle btn-sm" onClick={download}>Download</button>}
         {url && shareToApps() && (
           <button className="btn btn-subtle btn-sm" onClick={share}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8h16v-8M12 3v13M8 7l4-4 4 4" /></svg>

@@ -278,7 +278,7 @@ export default function ListingDetailPage() {
         <div className="assets-head">
           <div>
             <h2 className="block-title">Post assets</h2>
-            <p className="muted block-sub">Branded and ready to post — no design work.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo &amp; details in <Link to="/settings">Settings → Brand kit</Link>.</>}</p>
+            <p className="muted block-sub">Branded, ready to post.{!settings.brand?.agency && !settings.brand?.name && <> Add your logo in <Link to="/settings">Settings</Link>.</>}</p>
           </div>
           <button className="btn btn-primary btn-sm kit-btn" onClick={handleDownloadKit} disabled={kitBusy}>
             {kitBusy ? 'Building…' : (

@@ -61,5 +61,6 @@ export function statusCaption(listing, lang = 'en') {
       bm: `🎉 DISEWA — ${name}\nKunci diserahkan! Ada hartanah untuk disewa? Kami isi dengan cepat. 📩`,
     },
   }
-  return t[listing.marketStatus]?.[lang] || t[listing.marketStatus]?.en || ''
+  const key = lang === 'ms' ? 'bm' : (lang === 'zh' ? 'zh' : 'en') // app codes → template codes
+  return t[listing.marketStatus]?.[key] || t[listing.marketStatus]?.en || ''
 }
