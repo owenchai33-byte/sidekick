@@ -4,9 +4,12 @@ import { useApp } from '../context/AppContext.jsx'
 import { generateContent } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
-import { listingPhotos } from '../lib/photos.js'
-import { postToSocial, captionFor } from '../lib/social.js'
+import { listingPhotos, coverPhoto } from '../lib/photos.js'
+import { captionFor } from '../lib/social.js'
 import { MARKET_STATUSES, isHighlightStatus } from '../lib/marketStatus.js'
+import { getVideoBlob } from '../lib/media.js'
+import { uploadMedia } from '../lib/upload.js'
+import { renderGraphicCanvas, loadImage } from '../lib/graphics.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
@@ -38,21 +41,44 @@ export default function ListingDetailPage() {
   const [graphicFormat, setGraphicFormat] = useState('square')
   const [kitBusy, setKitBusy] = useState(false)
   const [queue, setQueue] = useState(null)
-  const [autoPosting, setAutoPosting] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [scheduleAt, setScheduleAt] = useState('')
   const autoRan = useRef(false)
 
-  // One-tap auto-post to FB Page + IG via the Make.com pipe (no Meta app).
-  async function autoPost() {
+  // The one "Post": publishes to the agent's connected accounts (their Connect-tab
+  // Zernio profile) — best asset (reel if made, else the branded graphic) + the
+  // right caption (status caption when Sold/Reduced/etc). Optional schedule.
+  async function doPost(scheduledFor) {
     const caption = captionFor(listing, 'facebook_page')
     if (!caption) return toast('Generate the copy first', 'warn')
-    setAutoPosting(true)
+    setPosting(true)
     try {
-      const r = await postToSocial({ caption, listing, platforms: 'facebook,instagram' })
-      toast(r.mediaUrl ? 'Posted photo to Facebook + Instagram 🎉' : 'Posted (text only — add a photo to reach Instagram) 🎉', 'success')
+      let mediaUrl, mediaType
+      const v = listing.videos?.[0]
+      if (v?.name?.endsWith('.mp4')) {
+        const blob = await getVideoBlob(v.id)
+        if (blob) { mediaUrl = await uploadMedia(blob, v.name); mediaType = 'video' }
+      }
+      if (!mediaUrl) {
+        const [photo, logo] = await Promise.all([loadImage(coverPhoto(listing)), loadImage(settings.brand?.logo)])
+        const canvas = renderGraphicCanvas({ listing, brand: settings.brand, format: 'square', photo, logo })
+        const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92))
+        mediaUrl = await uploadMedia(blob, `${listing.id}-graphic.jpg`)
+        mediaType = 'image'
+      }
+      const res = await fetch('/api/social-broadcast', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ caption, mediaUrl, mediaType, scheduledFor }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Post failed')
+      toast(j.scheduled ? `Scheduled to ${(j.posted || []).join(', ')} 🗓️` : `Posted to ${(j.posted || []).join(', ')} 🎉`, 'success')
+      setShowSchedule(false); setScheduleAt('')
     } catch (e) {
-      toast('Auto-post failed: ' + e.message, 'danger')
+      toast('Post failed: ' + e.message, 'danger')
     } finally {
-      setAutoPosting(false)
+      setPosting(false)
     }
   }
 
@@ -263,9 +289,23 @@ export default function ListingDetailPage() {
           <div className="progress-track"><div className="progress-fill" style={{ width: `${stats.total ? (stats.approved / stats.total) * 100 : 0}%` }} /></div>
           <span className="progress-label num">{stats.approved}/{stats.total} approved{stats.published ? ` · ${stats.published} published` : ''}</span>
         </div>
-        <div className="row wrap" style={{ gap: 8 }}>
-          {hasContent && <button className="btn btn-primary btn-sm" onClick={startPostEverywhere}>Post everywhere</button>}
-          {hasContent && <button className="btn btn-ghost btn-sm" onClick={autoPost} disabled={autoPosting}>{autoPosting ? 'Posting…' : 'Auto-post FB + IG'}</button>}
+        <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
+          {hasContent && !showSchedule && (
+            <>
+              <button className="btn btn-primary btn-sm" onClick={() => doPost()} disabled={posting}>{posting ? 'Posting…' : 'Post'}</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowSchedule(true)} title="Schedule for later" aria-label="Schedule for later">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+              </button>
+            </>
+          )}
+          {hasContent && showSchedule && (
+            <>
+              <input type="datetime-local" className="schedule-input" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />
+              <button className="btn btn-primary btn-sm" onClick={() => scheduleAt && doPost(new Date(scheduleAt).toISOString())} disabled={posting || !scheduleAt}>{posting ? 'Scheduling…' : 'Schedule'}</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setShowSchedule(false); setScheduleAt('') }}>Cancel</button>
+            </>
+          )}
+          {hasContent && <button className="btn btn-subtle btn-sm" onClick={startPostEverywhere} title="Manual copy-paste for Marketplace / Mudah">Post everywhere</button>}
           {hasContent && <button className="btn btn-ghost btn-sm" onClick={approveAll} disabled={stats.approved === stats.total}>Approve all</button>}
           <button className="btn btn-subtle btn-sm" onClick={() => runGenerate()} disabled={generating}>
             {generating ? 'Generating…' : hasContent ? 'Regenerate' : 'Generate'}
@@ -376,6 +416,7 @@ export default function ListingDetailPage() {
         .detail { display: flex; flex-direction: column; gap: 14px; }
         .status-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-500); }
         .status-pick select { font: inherit; color: var(--ink-900); background: var(--surface-sunk); border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 10px; cursor: pointer; -webkit-appearance: none; appearance: none; }
+        .schedule-input { font: inherit; font-size: 13px; color: var(--ink-900); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px 8px; }
 
         .summary { overflow: hidden; }
         .summary-photos { display: grid; gap: 3px; background: var(--line); }
