@@ -292,7 +292,7 @@ export default function ListingDetailPage() {
         <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
           {hasContent && !showSchedule && (
             <>
-              <button className="btn btn-primary btn-sm" onClick={() => doPost()} disabled={posting}>{posting ? 'Posting…' : 'Post'}</button>
+              <button className="btn btn-primary btn-sm" onClick={() => doPost()} disabled={posting}>{posting ? 'Auto-posting…' : 'Auto-post'}</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowSchedule(true)} title="Schedule for later" aria-label="Schedule for later">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
               </button>
@@ -305,7 +305,6 @@ export default function ListingDetailPage() {
               <button className="btn btn-ghost btn-sm" onClick={() => { setShowSchedule(false); setScheduleAt('') }}>Cancel</button>
             </>
           )}
-          {hasContent && <button className="btn btn-subtle btn-sm" onClick={startPostEverywhere} title="Manual copy-paste for Marketplace / Mudah">Post everywhere</button>}
           {hasContent && <button className="btn btn-ghost btn-sm" onClick={approveAll} disabled={stats.approved === stats.total}>Approve all</button>}
           <button className="btn btn-subtle btn-sm" onClick={() => runGenerate()} disabled={generating}>
             {generating ? 'Generating…' : hasContent ? 'Regenerate' : 'Generate'}

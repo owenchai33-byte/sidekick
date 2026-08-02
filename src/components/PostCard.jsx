@@ -117,32 +117,7 @@ export default function PostCard({
             <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg> Approved</>
           ) : 'Approve'}
         </button>
-
-        <div className="pc-spacer" />
-
-        <div className="pc-action-btns">
-          <button className="btn btn-subtle btn-sm" onClick={copyCaption}>Copy</button>
-          <button className="btn btn-primary btn-sm" onClick={openPublish} disabled={!isApproved} title={isApproved ? 'Open the step-by-step publish helper' : 'Approve first'}>
-            Publish
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
-          </button>
-        </div>
       </div>
-
-      {sheetOpen && (
-        <PublishSheet
-          platform={platform}
-          listing={listing || {}}
-          lang={lang}
-          text={text}
-          photos={photos}
-          videos={videos}
-          videoUrls={videoUrls}
-          toast={toast}
-          onPublished={() => onPublish?.(lang)}
-          onClose={() => setSheetOpen(false)}
-        />
-      )}
 
       <style>{`
         .postcard { padding: 16px; display: flex; flex-direction: column; gap: 13px; }
