@@ -75,10 +75,11 @@ export default function ListingsPage() {
 
       <style>{`
         .listings { display: flex; flex-direction: column; gap: 24px; }
-        .lp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-top: 4px; }
-        .lp-head h1 { font-size: 26px; letter-spacing: -0.02em; }
-        .lp-head p { margin-top: 5px; font-size: 13.5px; max-width: 42ch; }
+        .lp-head { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+        .lp-head h1 { font-size: 26px; letter-spacing: -0.02em; line-height: 1.1; }
+        .lp-head p { margin-top: 5px; font-size: 13.5px; max-width: 48ch; }
         .lp-new { flex: none; }
+        @media (min-width: 620px) { .lp-head { flex-direction: row; align-items: flex-start; justify-content: space-between; } }
 
         .empty { padding: 48px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
         .empty-mark { font-size: 44px; }

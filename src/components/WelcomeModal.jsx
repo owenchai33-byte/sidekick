@@ -3,16 +3,16 @@
 // it's safe. Shown once on first load; re-openable from the top-bar "?" button.
 
 const STEPS = [
-  { n: '1', k: 'PICK', d: 'Choose a listing worth promoting. You decide what gets the push — never the AI.' },
-  { n: '2', k: 'OPTIMISE', d: 'SideKick writes native copy for every platform in EN / 中文 / BM, and builds the graphics, carousel and reel.' },
-  { n: '3', k: 'APPROVE', d: 'Review every word. Edit anything. Nothing moves without your yes.' },
-  { n: '4', k: 'PUBLISH', d: 'One tap copies the caption and opens the compose page. You post it — so the account stays safe.' },
+  { n: '1', k: 'START', d: 'Paste a listing from WhatsApp — or pick one. SideKick pulls out the price, specs and location.' },
+  { n: '2', k: 'WRITE', d: 'It writes native copy for every platform in EN / 中文 / BM, and builds the graphic, carousel and reel.' },
+  { n: '3', k: 'CONNECT', d: 'Link your Facebook, Instagram and TikTok once. Every agent connects their own accounts.' },
+  { n: '4', k: 'POST', d: 'One tap posts to all of them — or schedule it. You review and approve before anything goes out.' },
 ]
 
 const TRUST = [
   { t: 'Written natively, not translated', d: 'Each language reads like a local wrote it — not a machine.' },
-  { t: 'A complete content kit per listing', d: 'Captions, branded graphics, a carousel and a reel — download it all in one tap.' },
-  { t: 'Never auto-posts', d: 'SideKick prepares; you publish. That’s what keeps Marketplace & Mudah accounts safe.' },
+  { t: 'A complete content kit per listing', d: 'Caption, branded graphic, carousel and reel — all built for you, ready to post.' },
+  { t: 'You approve before it posts', d: 'Review and edit every word first. Nothing goes out until you tap Post.' },
 ]
 
 export default function WelcomeModal({ open, onClose }) {

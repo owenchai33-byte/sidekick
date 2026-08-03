@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { getStatus } from '../lib/ai.js'
 import PlatformPicker from '../components/PlatformPicker.jsx'
@@ -46,6 +47,29 @@ export default function SettingsPage() {
   return (
     <div className="container settings">
       <header className="page-head"><h1>Settings</h1></header>
+
+      {/* Setup & tools — Connect + Dashboard live here so the phone bar stays lean */}
+      <section className="card block">
+        <h2 className="block-title">Setup &amp; tools</h2>
+        <div className="setup-links">
+          <Link to="/connect" className="setup-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12a3 3 0 0 0 3 3l3-3a3 3 0 0 0-4.2-4.2L11 9M15 12a3 3 0 0 0-3-3l-3 3a3 3 0 0 0 4.2 4.2L13 15" /></svg>
+            <div>
+              <strong>Connect accounts</strong>
+              <span className="muted">Link Facebook, Instagram &amp; TikTok to post</span>
+            </div>
+            <span className="setup-chev">›</span>
+          </Link>
+          <Link to="/pipeline" className="setup-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18M7 15l3-3 3 2 4-5" /></svg>
+            <div>
+              <strong>Dashboard</strong>
+              <span className="muted">See the pipeline across every listing</span>
+            </div>
+            <span className="setup-chev">›</span>
+          </Link>
+        </div>
+      </section>
 
       {/* Content engine */}
       <section className="card block">
@@ -151,6 +175,15 @@ export default function SettingsPage() {
 
       <style>{`
         .settings { display: flex; flex-direction: column; gap: 22px; }
+        .setup-links { display: flex; flex-direction: column; gap: 8px; }
+        .setup-link { display: flex; align-items: center; gap: 12px; padding: 13px; border-radius: var(--r-md);
+          background: var(--surface-sunk); color: var(--ink-900); text-decoration: none; transition: background 0.15s var(--ease); }
+        .setup-link:hover { background: color-mix(in srgb, var(--green-500) 12%, var(--surface-sunk)); }
+        .setup-link > svg { flex: none; color: var(--green-600); }
+        @media (prefers-color-scheme: dark) { .setup-link > svg { color: var(--green-400); } }
+        .setup-link strong { display: block; font-size: 14px; }
+        .setup-link span.muted { display: block; font-size: 12px; margin-top: 1px; }
+        .setup-chev { margin-left: auto; font-size: 22px; color: var(--ink-400); line-height: 1; }
         .page-head { padding-top: 4px; }
         .page-head h1 { font-size: 26px; letter-spacing: -0.02em; }
         .block { padding: 20px; }

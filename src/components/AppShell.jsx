@@ -9,14 +9,20 @@ function Logo() {
   return <span className="brand" role="img" aria-label="SideKick" />
 }
 
+// `primary` items show in the phone bottom bar (kept to 4 so it never feels
+// crowded). The desktop top nav has room, so it shows every item. Connect and
+// Dashboard live inside Settings on mobile — Connect is one-time setup and the
+// posting flow surfaces it contextually anyway.
 const NAV = [
-  { to: '/', label: 'Listings', icon: 'M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5', end: true },
-  { to: '/inbox', label: 'Inbox', icon: 'M4 13h4l2 3h4l2-3h4M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5' },
+  { to: '/', label: 'Listings', icon: 'M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5', end: true, primary: true },
+  { to: '/inbox', label: 'Inbox', icon: 'M4 13h4l2 3h4l2-3h4M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5', primary: true },
+  { to: '/content', label: 'Content', icon: 'M4 5h16M4 12h16M4 19h10', primary: true },
   { to: '/pipeline', label: 'Dashboard', icon: 'M3 3v18h18M7 15l3-3 3 2 4-5' },
-  { to: '/content', label: 'Content', icon: 'M4 5h16M4 12h16M4 19h10' },
   { to: '/connect', label: 'Connect', icon: 'M9 12a3 3 0 0 0 3 3l3-3a3 3 0 0 0-4.2-4.2L11 9M15 12a3 3 0 0 0-3-3l-3 3a3 3 0 0 0 4.2 4.2L13 15' },
-  { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 100-6 3 3 0 000 6zM12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5 19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5 19 5' },
+  { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 100-6 3 3 0 000 6zM12 3v2M12 19v2M5 5l1.5 1.5M17.5 17.5 19 19M3 12h2M19 12h2M5 19l1.5-1.5M17.5 6.5 19 5', primary: true },
 ]
+
+const MOBILE_NAV = NAV.filter((n) => n.primary)
 
 function NavIcon({ d }) {
   return (
@@ -69,7 +75,7 @@ export default function AppShell({ children }) {
       </main>
 
       <nav className="bottomnav" aria-label="Primary mobile">
-        {NAV.map((n) => (
+        {MOBILE_NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className="bottomnav-link">
             <NavIcon d={n.icon} />
             <span>{n.label}</span>
