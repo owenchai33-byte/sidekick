@@ -4,9 +4,9 @@
 // (listing → per-platform × per-language copy). Falls back to labelled demo
 // output when no key is configured or a call fails, so the app never dead-ends.
 
-import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
+import { buildParsePrompt, buildContentPrompt, buildPlanPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
-import { demoContent, demoParse } from '../shared/demo.js'
+import { demoContent, demoParse, demoPlan } from '../shared/demo.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -74,7 +74,19 @@ export default async function handler(req, res) {
       return send(res, 200, { demo: false, provider: status.provider, content })
     }
 
-    return send(res, 400, { error: 'Unknown action. Use "parse" or "content".' })
+    if (action === 'plan') {
+      const { brand, languages } = body
+      const n = Math.min(Math.max(Number(body?.count) || 6, 1), 12)
+      const langs = Array.isArray(languages) && languages.length ? languages : ['en']
+      if (!status.configured) {
+        return send(res, 200, { demo: true, ...demoPlan(n, langs) })
+      }
+      const text = await runModel(buildPlanPrompt(brand || {}, n, langs))
+      const data = extractJson(text)
+      return send(res, 200, { demo: false, provider: status.provider, posts: data?.posts || [] })
+    }
+
+    return send(res, 400, { error: 'Unknown action. Use "parse", "content" or "plan".' })
   } catch (err) {
     // Never dead-end a demo: on a real API failure, degrade to labelled samples.
     const message = err?.message || String(err)
@@ -88,6 +100,9 @@ export default async function handler(req, res) {
         error: message,
         content: demoContent(body.listing, body.platforms || [], body.languages || []),
       })
+    }
+    if (action === 'plan') {
+      return send(res, 200, { demo: true, degraded: true, error: message, ...demoPlan(Math.min(Number(body?.count) || 6, 12), body?.languages || ['en']) })
     }
     return send(res, 500, { error: message })
   }

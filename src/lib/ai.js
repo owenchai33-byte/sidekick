@@ -5,13 +5,16 @@
 // Pages), /api/generate is absent, so we run the same demo module locally.
 // On Vercel / local dev the real function answers and this fallback never fires.
 
-import { demoContent, demoParse } from '../../shared/demo.js'
+import { demoContent, demoParse, demoPlan } from '../../shared/demo.js'
 
 function localDemo(payload) {
   if (payload.action === 'status') return { provider: 'gemini', configured: false }
   if (payload.action === 'parse') return { demo: true, offline: true, fields: demoParse(payload.rawText) }
   if (payload.action === 'content') {
     return { demo: true, offline: true, content: demoContent(payload.listing, payload.platforms, payload.languages) }
+  }
+  if (payload.action === 'plan') {
+    return { demo: true, offline: true, ...demoPlan(payload.count, payload.languages) }
   }
   return {}
 }
@@ -42,6 +45,11 @@ export async function parseListing(rawText) {
 /** Generate per-platform × per-language copy. Returns { content, demo }. */
 export async function generateContent(listing, platforms, languages) {
   return callApi({ action: 'content', listing, platforms, languages })
+}
+
+/** Generate a month of non-listing content posts. Returns { posts, demo }. */
+export async function generateContentPlan(brand, count, languages) {
+  return callApi({ action: 'plan', brand, count, languages })
 }
 
 /** Whether a real provider key is configured. Returns { provider, configured }. */

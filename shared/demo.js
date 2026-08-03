@@ -101,6 +101,37 @@ export function demoContent(listing, platformIds, languageIds) {
   return out
 }
 
+/** Demo content plan: sample non-listing posts so the planner works offline. */
+export function demoPlan(count = 6, languageIds = ['en', 'zh', 'ms']) {
+  const posts = [
+    { category: 'market_tip', headline: 'Know your MOT fees', captions: {
+      en: '💡 Buying in Kuching? Budget for the Memorandum of Transfer (MOT) and legal fees on top of your deposit — first-timers often forget these. Ask me for a full cost breakdown before you commit. 📩 #KuchingProperty #HomeBuyingTips',
+      zh: '💡 在古晋买房，除了首付，别忘了转名费（MOT）和律师费也要预算——很多首次购房者都会漏掉。买之前私讯我，帮你算清全部费用。📩 #古晋房产 #买房贴士',
+      ms: '💡 Beli rumah di Kuching? Bajet kos Memorandum Pindah Milik (MOT) & guaman selain deposit — ramai pembeli kali pertama terlupa. PM saya untuk pecahan kos penuh sebelum komit. 📩 #HartanahKuching #TipBeliRumah' } },
+    { category: 'area_spotlight', headline: 'Why BDC?', captions: {
+      en: '📍 BDC keeps topping wishlists — cafés, groceries, schools and the hospital within reach, plus easy access to town. Great for families and rental demand alike. Buying or renting here? Let\'s talk. 📩 #BDC #KuchingArea',
+      zh: '📍 BDC 一直是热门之选——咖啡馆、超市、学校、医院样样齐全，进城也方便。自住或出租都抢手。想在这一带买或租？私讯聊聊。📩 #BDC #古晋房产',
+      ms: '📍 BDC sentiasa jadi pilihan — kafe, kedai, sekolah & hospital semua dekat, mudah ke bandar. Sesuai untuk keluarga & permintaan sewa tinggi. Nak beli atau sewa di sini? Jom borak. 📩 #BDC #Kuching' } },
+    { category: 'engagement', headline: 'Rent or buy in 2026?', captions: {
+      en: '🤔 Renting or buying in 2026 — which team are you? Drop a 🏠 for buy or 🔑 for rent, and tell me what\'s holding you back. Happy to point you the right way. #KuchingProperty',
+      zh: '🤔 2026年，你是买房派还是租房派？买房留 🏠，租房留 🔑，也说说是什么让你还在犹豫。很乐意帮你理清方向。#古晋房产',
+      ms: '🤔 2026 — sewa atau beli? Taip 🏠 untuk beli, 🔑 untuk sewa, dan kongsi apa yang buat anda teragak-agak. Saya bantu tunjuk arah. #HartanahKuching' } },
+    { category: 'seller_tip', headline: 'Sell? Declutter first', captions: {
+      en: '🏡 Selling your home? Before the photos: declutter, deep-clean, let the light in. A tidy, bright space photographs better and sells faster — no renovation needed. Want a free listing review? 📩 #SellerTips',
+      zh: '🏡 打算卖房？拍照前先做三件事：清杂物、深度清洁、让光线进来。整洁明亮的空间照片更好看，也卖得更快——不用装修。想免费帮你看看房源？私讯我。📩 #卖房贴士',
+      ms: '🏡 Nak jual rumah? Sebelum ambil gambar: kemas, cuci bersih & biar cahaya masuk. Ruang kemas & terang bergambar lebih cantik, laku lebih cepat. Nak semakan senarai percuma? 📩 #TipPenjual' } },
+    { category: 'festive', headline: 'Selamat Hari Gawai', captions: {
+      en: '🌾 Selamat Hari Gawai to everyone celebrating across Sarawak! Wishing you togetherness, a good harvest and new beginnings — maybe even a new home. From our family to yours. 🏡 #Gawai #Kuching',
+      zh: '🌾 祝砂拉越所有欢庆的朋友 Gawai 节快乐！愿这个丰收季节团圆美满、万事顺心——也许还有个新家等着你。🏡 #Gawai节 #古晋',
+      ms: '🌾 Selamat Hari Gawai kepada semua yang menyambut di Sarawak! Semoga musim ini penuh kemesraan, tuaian baik & permulaan baharu — mungkin juga rumah baharu. 🏡 #Gawai #Kuching' } },
+    { category: 'credibility', headline: 'Local agent, real edge', captions: {
+      en: '🤝 A local agent knows more than listings — which streets flood, which areas are quietly growing, what a fair price really is. That\'s the difference between a house and the right home. Here to help, no pressure. 📩 #KuchingProperty',
+      zh: '🤝 本地经纪懂的不只是房源——哪条街会淹水、哪一区在悄悄升值、什么才是合理价。这就是「一间房」和「对的家」的差别。随时帮你，绝不催促。📩 #古晋房产',
+      ms: '🤝 Ejen tempatan tahu lebih daripada senarai — jalan mana banjir, kawasan mana sedang membangun, harga berpatutan sebenar. Itu beza antara rumah biasa & rumah yang betul. Sedia bantu, tanpa tekanan. 📩 #HartanahKuching' } },
+  ]
+  return { posts: posts.slice(0, count).map((p) => ({ ...p, captions: Object.fromEntries(languageIds.map((l) => [l, p.captions[l] || p.captions.en])) })) }
+}
+
 /** Demo parse: light heuristics so paste-to-parse works offline too. */
 export function demoParse(rawText) {
   const t = (rawText || '').toLowerCase()

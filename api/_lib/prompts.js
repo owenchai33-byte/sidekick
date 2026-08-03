@@ -92,3 +92,37 @@ Return ONLY a JSON object — no markdown, no code fences, no commentary — sha
 ${platforms.map((p) => `  "${p.id}": { ${languages.map((l) => `"${l.id}": "..."`).join(', ')} }`).join(',\n')}
 }`
 }
+
+/** PLAN: a month of non-listing content posts (tips, area spotlights, festive,
+ *  engagement) that keep an agent's feed active between listings. */
+export function buildPlanPrompt(brand, count, languageIds) {
+  const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
+  const langList = languages.map((l) => `"${l.id}" = ${l.native}`).join(', ')
+  const who = brand?.agency || brand?.name || 'a property agent'
+  return `You are the social media manager for ${who}, a property agent in Kuching, Sarawak, Malaysia. Plan ${count} SHORT, engaging NON-LISTING posts that keep the feed active between property listings and build trust + enquiries.
+
+MIX these categories (vary them, avoid repeats):
+- market_tip: a genuine Kuching/Sarawak property insight (financing, MOT, legal fees, loan margin, timing)
+- buyer_tip or seller_tip: one practical, true piece of advice
+- area_spotlight: a Kuching area worth living in (BDC, Batu Kawa, Green Heights, Samarahan, Petra Jaya…) and why
+- festive: a warm greeting for a relevant Malaysian/Sarawak occasion (CNY, Hari Raya, Deepavali, Gawai Dayak, Christmas, Merdeka)
+- engagement: a light question that invites comments
+- credibility: a soft "why work with a local agent" trust-builder (no fake numbers)
+
+Write EACH post NATIVELY in each language (never translated): ${langList}. A 中文 post follows Chinese social conventions; Bahasa Malaysia must read like a local wrote it.
+
+CRAFT:
+- Punchy and real; vary length; sound like a trusted local, not a brochure.
+- BAN AI clichés: "nestled", "boasts", "unlock", "dream home", "look no further", "in today's market".
+- NEVER invent statistics, prices, projects or claims — keep tips general and true.
+- Each post gets a very short punchy HEADLINE (max ~5 words, for a graphic) + the caption with 2–4 relevant hashtags at the end.
+- End engagement/credibility posts with a soft CTA to DM / WhatsApp.
+
+Return ONLY raw JSON — no markdown, no code fences — shaped exactly:
+{
+  "posts": [
+    { "category": "market_tip", "headline": "...", "captions": { ${languages.map((l) => `"${l.id}": "..."`).join(', ')} } }
+  ]
+}
+Produce exactly ${count} posts.`
+}
