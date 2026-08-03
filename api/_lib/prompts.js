@@ -126,3 +126,23 @@ Return ONLY raw JSON — no markdown, no code fences — shaped exactly:
 }
 Produce exactly ${count} posts.`
 }
+
+/** REFINE: rewrite one existing post per a short instruction (Shorter, Punchier,
+ *  More urgent, or a free-text ask) — the in-app "edit with ChatGPT". */
+export function buildRefinePrompt(text, instruction, platformId, langId) {
+  const p = PLATFORM_MAP[platformId]
+  const l = LANGUAGE_MAP[langId]
+  const native = l ? l.native : 'the same language'
+  return `Rewrite this social post for ${p ? p.name : 'social media'}, following this instruction: "${instruction}".
+
+Rules:
+- Keep it in ${native}, written natively (NEVER translated), same platform voice.
+- Ready to post: no placeholders, no markdown, no commentary, no quotes around it.
+- Keep the platform's hashtag convention (hashtags only where that platform allows).
+- Don't invent facts not in the original.
+
+CURRENT POST:
+${text}
+
+Return ONLY the rewritten post text — nothing else.`
+}

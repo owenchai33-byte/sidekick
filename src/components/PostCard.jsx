@@ -5,6 +5,7 @@ import PublishSheet from './PublishSheet.jsx'
 import { useVideoUrls } from './MediaUploader.jsx'
 import { listingPhotos } from '../lib/photos.js'
 import { copyText } from '../lib/clipboard.js'
+import { refineContent } from '../lib/ai.js'
 
 // One listing shown per platform, tabbed across EN / 中文 / BM. Two views:
 // a visual Preview (how the post really looks) and Text (edit inline). Approve
@@ -26,6 +27,7 @@ export default function PostCard({
   const [active, setActive] = useState(languages[0] || 'en')
   const [view, setView] = useState('preview') // 'preview' | 'text'
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [refining, setRefining] = useState(false)
   const lang = languages.includes(active) ? active : languages[0]
   const text = content[lang] ?? ''
   const isApproved = !!approvals[lang]
@@ -39,6 +41,19 @@ export default function PostCard({
   async function copyCaption() {
     const ok = await copyText(text)
     toast?.(ok ? 'Caption copied' : 'Copy blocked — select & copy manually', ok ? 'success' : 'warn')
+  }
+
+  // In-app "edit with ChatGPT": rewrite this post per a quick instruction.
+  async function refine(instruction) {
+    if (!text || refining) return
+    setRefining(true)
+    try {
+      const r = await refineContent(text, instruction, platform.id, lang)
+      if (r.demo) { toast?.('Refine runs live on the deployed app (needs an AI key)', 'warn'); return }
+      if (r.text && r.text.trim() && r.text !== text) { onEditText?.(lang, r.text); toast?.('Refined ✨', 'success') }
+      else toast?.('No change', 'warn')
+    } catch (e) { toast?.('Refine failed: ' + e.message, 'danger') }
+    finally { setRefining(false) }
   }
 
   function openPublish() {
@@ -107,6 +122,13 @@ export default function PostCard({
         )}
       </div>
 
+      <div className="pc-refine">
+        <span className="pc-refine-label">✨ Refine</span>
+        {['Shorter', 'Punchier', 'More urgent', 'Rewrite'].map((i) => (
+          <button key={i} className="btn btn-subtle btn-sm pc-refine-btn" onClick={() => refine(i)} disabled={refining || !text}>{i}</button>
+        ))}
+      </div>
+
       <div className="pc-actions">
         <button
           className={`chip pc-approve ${isApproved ? 'on' : ''}`}
@@ -153,6 +175,9 @@ export default function PostCard({
         .pc-textarea { border: none; background: transparent; padding: 14px; font-size: 14px; line-height: 1.62; }
         .pc-textarea:focus { box-shadow: none; }
 
+        .pc-refine { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 10px 14px 0; }
+        .pc-refine-label { font-size: 12px; font-weight: 700; color: var(--ink-500); margin-right: 2px; }
+        .pc-refine-btn { font-size: 12px; padding: 4px 10px; }
         .pc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .pc-approve svg { margin-right: 2px; }
         .pc-spacer { flex: 1; min-width: 8px; }

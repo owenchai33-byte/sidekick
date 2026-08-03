@@ -16,6 +16,9 @@ function localDemo(payload) {
   if (payload.action === 'plan') {
     return { demo: true, offline: true, ...demoPlan(payload.count, payload.languages) }
   }
+  if (payload.action === 'refine') {
+    return { demo: true, offline: true, text: payload.text }
+  }
   return {}
 }
 
@@ -50,6 +53,11 @@ export async function generateContent(listing, platforms, languages) {
 /** Generate a month of non-listing content posts. Returns { posts, demo }. */
 export async function generateContentPlan(brand, count, languages) {
   return callApi({ action: 'plan', brand, count, languages })
+}
+
+/** Refine one post per an instruction (Shorter / Punchier / …). Returns { text, demo }. */
+export async function refineContent(text, instruction, platform, lang) {
+  return callApi({ action: 'refine', text, instruction, platform, lang })
 }
 
 /** Whether a real provider key is configured. Returns { provider, configured }. */

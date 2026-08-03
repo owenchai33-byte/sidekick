@@ -4,7 +4,7 @@
 // (listing → per-platform × per-language copy). Falls back to labelled demo
 // output when no key is configured or a call fails, so the app never dead-ends.
 
-import { buildParsePrompt, buildContentPrompt, buildPlanPrompt } from './_lib/prompts.js'
+import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoContent, demoParse, demoPlan } from '../shared/demo.js'
 
@@ -86,7 +86,15 @@ export default async function handler(req, res) {
       return send(res, 200, { demo: false, provider: status.provider, posts: data?.posts || [] })
     }
 
-    return send(res, 400, { error: 'Unknown action. Use "parse", "content" or "plan".' })
+    if (action === 'refine') {
+      const { text, instruction, platform, lang } = body
+      if (!text || !instruction) return send(res, 400, { error: 'text and instruction are required' })
+      if (!status.configured) return send(res, 200, { demo: true, text }) // can't refine without a key
+      const out = await runModel(buildRefinePrompt(text, instruction, platform, lang))
+      return send(res, 200, { demo: false, provider: status.provider, text: (out || '').trim() })
+    }
+
+    return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan" or "refine".' })
   } catch (err) {
     // Never dead-end a demo: on a real API failure, degrade to labelled samples.
     const message = err?.message || String(err)
@@ -103,6 +111,9 @@ export default async function handler(req, res) {
     }
     if (action === 'plan') {
       return send(res, 200, { demo: true, degraded: true, error: message, ...demoPlan(Math.min(Number(body?.count) || 6, 12), body?.languages || ['en']) })
+    }
+    if (action === 'refine' && body?.text) {
+      return send(res, 200, { demo: true, degraded: true, error: message, text: body.text })
     }
     return send(res, 500, { error: message })
   }
