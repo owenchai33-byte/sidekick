@@ -19,6 +19,9 @@ function localDemo(payload) {
   if (payload.action === 'refine') {
     return { demo: true, offline: true, text: payload.text }
   }
+  if (payload.action === 'cover') {
+    return { demo: true, offline: true, index: 0 }
+  }
   return {}
 }
 
@@ -58,6 +61,11 @@ export async function generateContentPlan(brand, count, languages) {
 /** Refine one post per an instruction (Shorter / Punchier / …). Returns { text, demo }. */
 export async function refineContent(text, instruction, platform, lang) {
   return callApi({ action: 'refine', text, instruction, platform, lang })
+}
+
+/** Pick the best cover photo. images = [{ mimeType, data(base64) }]. Returns { index, demo }. */
+export async function pickCover(images) {
+  return callApi({ action: 'cover', images })
 }
 
 /** Whether a real provider key is configured. Returns { provider, configured }. */

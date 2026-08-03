@@ -90,6 +90,21 @@ export function loadImage(src) {
   })
 }
 
+// Downscale an image (data: URL or same-origin path) to a small JPEG base64
+// string (no data: prefix) — cheap payload for the vision cover-pick. Null if
+// it can't load or the canvas is tainted (cross-origin).
+export async function thumbBase64(src, size = 320) {
+  const img = await loadImage(src)
+  if (!img) return null
+  const c = document.createElement('canvas')
+  c.width = size; c.height = size
+  const ctx = c.getContext('2d')
+  const scale = Math.max(size / img.width, size / img.height)
+  const w = img.width * scale, h = img.height * scale
+  ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h)
+  try { return c.toDataURL('image/jpeg', 0.7).split(',')[1] } catch { return null }
+}
+
 export function initials(name) {
   return (name || 'SK').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 }

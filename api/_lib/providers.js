@@ -99,3 +99,24 @@ export function extractJson(text) {
     throw new Error('Model did not return valid JSON')
   }
 }
+
+// Vision: prompt + inline images → text (used to pick the best cover photo).
+// Gemini-only for now (the free default); other providers throw.
+export async function runModelVision(prompt, images) {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) throw new Error('GEMINI_API_KEY not set (vision needs Gemini)')
+  const model = process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+  const parts = [{ text: prompt }, ...images.map((img) => ({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.data } }))]
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.2, responseMimeType: 'application/json' } }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`Gemini vision ${res.status}: ${detail.slice(0, 200)}`)
+  }
+  const data = await res.json()
+  return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
+}

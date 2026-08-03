@@ -9,7 +9,8 @@ import { captionFor } from '../lib/social.js'
 import { MARKET_STATUSES, isHighlightStatus } from '../lib/marketStatus.js'
 import { getVideoBlob } from '../lib/media.js'
 import { uploadMedia } from '../lib/upload.js'
-import { renderGraphicCanvas, loadImage } from '../lib/graphics.js'
+import { renderGraphicCanvas, loadImage, thumbBase64 } from '../lib/graphics.js'
+import { pickCover } from '../lib/ai.js'
 import { PLATFORM_MAP } from '../../shared/constants.js'
 import BackButton from '../components/BackButton.jsx'
 import PriceTag from '../components/PriceTag.jsx'
@@ -18,6 +19,7 @@ import PublishSheet from '../components/PublishSheet.jsx'
 import PropertyGraphic from '../components/PropertyGraphic.jsx'
 import PropertyCarousel from '../components/PropertyCarousel.jsx'
 import PropertyVideo from '../components/PropertyVideo.jsx'
+import MediaUploader from '../components/MediaUploader.jsx'
 import { downloadKit } from '../lib/kit.js'
 import PlatformPicker from '../components/PlatformPicker.jsx'
 import LanguagePicker from '../components/LanguagePicker.jsx'
@@ -44,7 +46,32 @@ export default function ListingDetailPage() {
   const [posting, setPosting] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [scheduleAt, setScheduleAt] = useState('')
+  const [coverBusy, setCoverBusy] = useState(false)
   const autoRan = useRef(false)
+
+  // Gemini vision picks the best cover photo, so agents don't sift through the
+  // pile — just dump all the WhatsApp photos and let it choose the hero shot.
+  async function autoPickCover() {
+    const photos = listing.photos || []
+    if (photos.length < 2) return
+    setCoverBusy(true)
+    try {
+      const images = []
+      for (const src of photos.slice(0, 8)) {
+        const data = await thumbBase64(src)
+        if (data) images.push({ mimeType: 'image/jpeg', data })
+      }
+      if (images.length < 2) throw new Error('Could not read the photos')
+      const r = await pickCover(images)
+      if (r.demo) return toast('Auto-pick cover runs live on the deployed app (needs an AI key)', 'warn')
+      const i = r.index || 0
+      if (i > 0 && i < photos.length) {
+        patch((l) => ({ ...l, photos: [photos[i], ...photos.filter((_, idx) => idx !== i)] }))
+        toast('Cover updated to the best shot ✨', 'success')
+      } else toast('First photo is already the best cover ✓', 'success')
+    } catch (e) { toast('Auto-pick failed: ' + e.message, 'danger') }
+    finally { setCoverBusy(false) }
+  }
 
   // The one "Post": publishes to the agent's connected accounts (their Connect-tab
   // Zernio profile) — best asset (reel if made, else the branded graphic) + the
@@ -311,6 +338,24 @@ export default function ListingDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Photos */}
+      <section className="card block" style={{ padding: 16 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+          <div>
+            <h2 className="block-title">Photos</h2>
+            <p className="muted block-sub" style={{ margin: '3px 0 0' }}>Dump all the WhatsApp photos — first one is the cover.</p>
+          </div>
+          {(listing.photos?.length || 0) > 1 && (
+            <button className="btn btn-subtle btn-sm" onClick={autoPickCover} disabled={coverBusy}>{coverBusy ? 'Picking…' : '✨ Auto-pick cover'}</button>
+          )}
+        </div>
+        <MediaUploader
+          photos={listing.photos || []} videos={[]}
+          onChangePhotos={(p) => patch((l) => ({ ...l, photos: p }))}
+          onChangeVideos={() => {}}
+        />
+      </section>
 
       {/* Post assets */}
       <section className="card assets">

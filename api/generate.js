@@ -4,8 +4,8 @@
 // (listing → per-platform × per-language copy). Falls back to labelled demo
 // output when no key is configured or a call fails, so the app never dead-ends.
 
-import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt } from './_lib/prompts.js'
-import { runModel, extractJson, providerStatus } from './_lib/providers.js'
+import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt, buildCoverPrompt } from './_lib/prompts.js'
+import { runModel, runModelVision, extractJson, providerStatus } from './_lib/providers.js'
 import { demoContent, demoParse, demoPlan } from '../shared/demo.js'
 
 function send(res, status, payload) {
@@ -94,7 +94,17 @@ export default async function handler(req, res) {
       return send(res, 200, { demo: false, provider: status.provider, text: (out || '').trim() })
     }
 
-    return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan" or "refine".' })
+    if (action === 'cover') {
+      const { images } = body
+      if (!Array.isArray(images) || images.length < 2) return send(res, 400, { error: 'need 2+ images' })
+      if (!status.configured) return send(res, 200, { demo: true, index: 0 }) // demo: keep first
+      const out = await runModelVision(buildCoverPrompt(images.length), images)
+      const parsed = extractJson(out)
+      const idx = Math.max(0, Math.min(images.length - 1, Number(parsed?.index) || 0))
+      return send(res, 200, { demo: false, provider: status.provider, index: idx })
+    }
+
+    return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan", "refine" or "cover".' })
   } catch (err) {
     // Never dead-end a demo: on a real API failure, degrade to labelled samples.
     const message = err?.message || String(err)
@@ -114,6 +124,9 @@ export default async function handler(req, res) {
     }
     if (action === 'refine' && body?.text) {
       return send(res, 200, { demo: true, degraded: true, error: message, text: body.text })
+    }
+    if (action === 'cover') {
+      return send(res, 200, { demo: true, degraded: true, error: message, index: 0 })
     }
     return send(res, 500, { error: message })
   }

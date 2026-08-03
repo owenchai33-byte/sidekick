@@ -146,3 +146,12 @@ ${text}
 
 Return ONLY the rewritten post text — nothing else.`
 }
+
+/** COVER: pick the best cover photo from a set of images (0-based index). */
+export function buildCoverPrompt(count) {
+  return `You are picking the single best COVER photo for a property listing social post. There are ${count} photos, numbered 0 to ${count - 1} in the order given.
+
+Pick the one that best sells the property: a clear, well-lit hero shot — the exterior/facade, or a bright, attractive living space. AVOID as cover: blurry, dark, cluttered or empty shots, and bathroom / close-up detail shots.
+
+Return ONLY JSON: {"index": N} where N is the 0-based number of the best cover photo.`
+}
