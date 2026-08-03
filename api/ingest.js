@@ -22,6 +22,8 @@
 import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
+import { renderBrandCard } from './_lib/brandcard.js'
+import { put } from '@vercel/blob'
 
 const ZERNIO = 'https://zernio.com/api/v1'
 const DEFAULT_PROFILE = '6a6c498971a67c109cfcae06' // central brand profile
@@ -71,6 +73,25 @@ async function writeCaption(listing, languages, status) {
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
   return parts.join('\n\n• • •\n\n')
+}
+
+// Best-effort: render a branded price card from the first photo and prepend it
+// as the cover. Never throws — on any failure the original photos are used.
+async function withBrandCard(media, listing, brand, enabled) {
+  if (!enabled) return { items: media }
+  const first = media.find((m) => m.type === 'image')
+  if (!first) return { items: media } // video-only post — nothing to overlay
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { items: media, cardError: 'no BLOB token' }
+  try {
+    const png = await renderBrandCard(first.url, listing, brand || {})
+    const blob = await put('ingest/card.png', png, {
+      access: 'public', addRandomSuffix: true, contentType: 'image/png',
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    })
+    return { items: [{ url: blob.url, type: 'image' }, ...media], card: blob.url }
+  } catch (e) {
+    return { items: media, cardError: e?.message || String(e) }
+  }
 }
 
 // Query the central profile's connected accounts on Zernio.
@@ -150,7 +171,8 @@ export default async function handler(req, res) {
       return send(res, 200, { ok: false, posted: false, reason: 'No connected accounts on the central profile yet', listing, caption, media, meta })
     }
     const platforms = accounts.map((a) => ({ platform: a.platform, accountId: a._id }))
-    const post = { content: caption, mediaItems: media, platforms, publishNow: true }
+    const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, body?.brand, body?.card !== false)
+    const post = { content: caption, mediaItems, platforms, publishNow: true }
     const pr = await fetch(`${ZERNIO}/posts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
@@ -158,7 +180,7 @@ export default async function handler(req, res) {
     })
     const ptext = await pr.text().catch(() => '')
     if (!pr.ok) return send(res, 502, { ok: false, posted: false, error: `Zernio post ${pr.status}: ${ptext.slice(0, 200)}`, listing, caption })
-    return send(res, 200, { ok: true, posted: platforms.map((p) => p.platform), listing, caption, mediaCount: media.length, meta })
+    return send(res, 200, { ok: true, posted: platforms.map((p) => p.platform), listing, caption, mediaCount: mediaItems.length, card: card || null, ...(cardError ? { cardError } : {}), meta })
   } catch (e) {
     return send(res, 502, { ok: false, posted: false, error: 'Zernio unreachable: ' + (e?.message || String(e)), listing, caption })
   }
