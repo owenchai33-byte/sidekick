@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { generateContentPlan } from '../lib/ai.js'
+import ContentPostCard from '../components/ContentPostCard.jsx'
 
 // "Max"-style AI content planner: a month of non-listing posts (tips, area
 // spotlights, festive, engagement) in native EN / 中文 / BM, so an agent's feed
@@ -79,17 +80,11 @@ export default function ContentPlanPage() {
         {plan.map((p) => {
           const cat = CATS[p.category] || { label: p.category, color: 'var(--ink-500)' }
           return (
-            <div key={p.id} className={`plan-card ${p.approved ? 'on' : ''}`}>
-              <div className="plan-card-top">
-                <span className="plan-cat" style={{ background: cat.color }}>{cat.label}</span>
-                <button className="plan-x" onClick={() => remove(p.id)} aria-label="Remove">×</button>
-              </div>
-              <div className="plan-headline">{p.headline}</div>
-              <p className="plan-caption">{p.captions?.[lang] || p.captions?.en}</p>
-              <button className={`chip plan-approve ${p.approved ? 'on' : ''}`} aria-pressed={p.approved} onClick={() => toggle(p.id)}>
-                {p.approved ? '✓ Approved' : 'Approve'}
-              </button>
-            </div>
+            <ContentPostCard
+              key={p.id} post={p} lang={lang} brand={settings.brand}
+              catLabel={cat.label} catColor={cat.color}
+              onToggle={() => toggle(p.id)} onRemove={() => remove(p.id)} toast={toast}
+            />
           )
         })}
       </div>
@@ -110,9 +105,10 @@ export default function ContentPlanPage() {
         .plan-cat { color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .02em; padding: 3px 10px; border-radius: 999px; }
         .plan-x { border: none; background: transparent; color: var(--ink-400); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
         .plan-x:hover { color: var(--danger-600, #d92d20); }
-        .plan-headline { font-weight: 800; font-size: 16px; }
+        .plan-canvas { width: 100%; aspect-ratio: 1; border-radius: 10px; display: block; background: var(--surface-sunk); }
         .plan-caption { font-size: 13px; color: var(--ink-600); white-space: pre-wrap; margin: 0; flex: 1; }
-        .plan-approve { align-self: flex-start; }
+        .plan-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .plan-approve { margin-right: auto; }
       `}</style>
     </div>
   )

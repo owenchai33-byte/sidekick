@@ -33,6 +33,53 @@ export function renderGraphicCanvas({ listing, brand, format = 'square', photo, 
   return canvas
 }
 
+// A branded "content" card (no listing photo): brand-colour background + a big
+// headline + the brand bar. Gives each AI Content Planner post a real graphic.
+export function renderTextCard({ brand, headline, category, format = 'square', logo, scale = RENDER_SCALE }) {
+  const [W, H] = SIZES[format] || SIZES.square
+  const { canvas, ctx } = makeCanvas(W, H, scale)
+  const color = (brand && brand.color) || '#2d6a4f'
+  const pad = 72
+
+  const g = ctx.createLinearGradient(0, 0, W, H)
+  g.addColorStop(0, shade(color, 24))
+  g.addColorStop(1, shade(color, -46))
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, W, H)
+
+  if (category) {
+    const label = String(category).toUpperCase()
+    ctx.font = '700 30px Inter, system-ui, sans-serif'
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    const tw = ctx.measureText(label).width + 44
+    roundRect(ctx, pad, pad, tw, 56, 28)
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, pad + 22, pad + 29)
+  }
+
+  ctx.fillStyle = '#fff'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+  const maxW = W - pad * 2
+  let fs = 104
+  ctx.font = `800 ${fs}px Inter, system-ui, sans-serif`
+  let lines = wrapLines(ctx, headline || '', maxW)
+  while (lines.length * fs * 1.16 > H * 0.46 && fs > 44) {
+    fs -= 6
+    ctx.font = `800 ${fs}px Inter, system-ui, sans-serif`
+    lines = wrapLines(ctx, headline || '', maxW)
+  }
+  const lh = fs * 1.16
+  let y = H * 0.5 - (lines.length * lh) / 2 + fs * 0.8
+  for (const line of lines) { ctx.fillText(line, pad, y); y += lh }
+
+  drawBrandBar(ctx, W, H, brand || {}, logo)
+  return canvas
+}
+
 export function loadImage(src) {
   return new Promise((resolve) => {
     if (!src) return resolve(null)
