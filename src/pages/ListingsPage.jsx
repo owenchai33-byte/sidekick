@@ -31,10 +31,13 @@ export default function ListingsPage() {
           <h1>Listings</h1>
           <p className="muted">Pick what's worth promoting — SideKick handles the copy and staging.</p>
         </div>
-        <Link to="/new" className="btn btn-primary lp-new">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
-          New listing
-        </Link>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <Link to="/new" className="btn btn-subtle btn-sm">New listing</Link>
+          <Link to="/create" className="btn btn-primary lp-new">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4z" /><path d="M19 15l.9 2.3L22 18l-2.1.7L19 21l-.9-2.3L16 18l2.1-.7z" /></svg>
+            Create a post
+          </Link>
+        </div>
       </header>
 
       {listings.length === 0 ? (

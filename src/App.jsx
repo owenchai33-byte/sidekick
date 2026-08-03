@@ -9,6 +9,7 @@ import SettingsPage from './pages/SettingsPage.jsx'
 import ConnectPage from './pages/ConnectPage.jsx'
 import ContentPlanPage from './pages/ContentPlanPage.jsx'
 import InboxPage from './pages/InboxPage.jsx'
+import CreatePostPage from './pages/CreatePostPage.jsx'
 
 export default function App() {
   const { loading } = useApp()
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/" element={<ListingsPage />} />
           <Route path="/new" element={<NewListingPage />} />
           <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/create" element={<CreatePostPage />} />
           <Route path="/listing/:id" element={<ListingDetailPage />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="/connect" element={<ConnectPage />} />
