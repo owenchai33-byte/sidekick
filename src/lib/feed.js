@@ -4,10 +4,12 @@
 export async function getFeed() {
   try {
     const r = await fetch('/api/feed')
-    if (!r.ok) return { status: null, posts: [] }
+    if (!r.ok) return { status: null, pending: [], posts: [] }
     const d = await r.json().catch(() => null)
-    return d && typeof d === 'object' ? { status: d.status || null, posts: d.posts || [] } : { status: null, posts: [] }
+    return d && typeof d === 'object'
+      ? { status: d.status || null, pending: d.pending || [], posts: d.posts || [] }
+      : { status: null, pending: [], posts: [] }
   } catch {
-    return { status: null, posts: [] }
+    return { status: null, pending: [], posts: [] }
   }
 }

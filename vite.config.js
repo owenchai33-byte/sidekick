@@ -35,6 +35,7 @@ function devApi(env) {
       mount('social-disconnect')
       mount('ingest')
       mount('feed')
+      mount('approve')
     },
   }
 }

@@ -1,33 +1,27 @@
-// WhatsApp auto-ingest webhook — the hands-off path.
+// WhatsApp ingest webhook — the "prepare & hold for ✅" path.
 //
 // An agent posts a listing in the WhatsApp group. OpenClaw (watching the group)
-// forwards it here as { text, images[] }. SideKick parses the listing, writes a
-// native caption with the content engine, and — in full-auto mode — posts it
-// straight to the central brand account's connected socials. No taps.
+// forwards it here as { text, images[] }. SideKick parses it, writes a native
+// caption, renders a branded card, and — by default — HOLDS the finished post
+// for approval, returning a preview OpenClaw can send to a control chat. When
+// the human replies ✅, OpenClaw calls /api/approve to actually publish.
 //
-// SECURITY: this URL can fire real posts, so it is gated by a shared secret.
-// Set INGEST_SECRET in the environment and send it as the `x-ingest-secret`
-// header (or ?secret=). With no secret configured the endpoint refuses to run,
-// so a leaked URL alone can't post anything.
+// Modes (body):
+//   (default)   review — prepare + hold; returns { pendingId, caption, card, cover }
+//   auto:true   publish immediately, skipping approval
+//   dry:true    parse + caption only; no card, no store, no post (wiring test)
 //
-// Contract:
-//   POST /api/ingest          headers: x-ingest-secret: <secret>
-//   body { text, images:[url...], sender?, group?, languages?, auto? }
-//     - text     the WhatsApp message (price / specs / location, free-form)
-//     - images   PUBLIC http(s) URLs of the listing photos/video (OpenClaw hosts them)
-//     - auto     default true = post now; false = parse + caption only (dry run)
-//   GET  /api/ingest          headers: x-ingest-secret: <secret>
-//     → readiness check (is a provider live? is the brand account connected?)
+// SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
+// With no secret configured it refuses to run. GET = readiness check.
 
 import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
+import { putPending } from './_lib/pending.js'
+import { connectedAccounts, postToConnected, DEFAULT_PROFILE } from './_lib/zernio.js'
 import { put } from '@vercel/blob'
-
-const ZERNIO = 'https://zernio.com/api/v1'
-const DEFAULT_PROFILE = '6a6c498971a67c109cfcae06' // central brand profile
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -62,8 +56,8 @@ async function parseText(text, status) {
   try { return extractJson(await runModel(buildParsePrompt(text))) } catch { return demoParse(text) }
 }
 
-// One caption for the brand account. Generates FB-page copy per requested
-// language (native, not translated) and joins them with a light divider.
+// Native caption for the brand account: FB-page copy per requested language,
+// joined with a light divider (falls back to labelled demo copy without a key).
 async function writeCaption(listing, languages, status) {
   const langs = languages.length ? languages : ['en']
   let content
@@ -76,12 +70,12 @@ async function writeCaption(listing, languages, status) {
   return parts.join('\n\n• • •\n\n')
 }
 
-// Best-effort: render a branded price card from the first photo and prepend it
-// as the cover. Never throws — on any failure the original photos are used.
+// Best-effort branded card as the cover. Never throws — on any failure the
+// original photos are used so a post is never blocked by the graphic.
 async function withBrandCard(media, listing, brand, enabled) {
   if (!enabled) return { items: media }
   const first = media.find((m) => m.type === 'image')
-  if (!first) return { items: media } // video-only post — nothing to overlay
+  if (!first) return { items: media } // video-only — nothing to overlay
   if (!process.env.BLOB_READ_WRITE_TOKEN) return { items: media, cardError: 'no BLOB token' }
   try {
     const png = await renderBrandCard(first.url, listing, brand || {})
@@ -93,16 +87,6 @@ async function withBrandCard(media, listing, brand, enabled) {
   } catch (e) {
     return { items: media, cardError: e?.message || String(e) }
   }
-}
-
-// Query the central profile's connected accounts on Zernio.
-async function connectedAccounts(key, profileId) {
-  const ar = await fetch(`${ZERNIO}/accounts?profileId=${encodeURIComponent(profileId)}`, {
-    headers: { authorization: `Bearer ${key}` },
-  })
-  const ad = await ar.json().catch(() => ({}))
-  if (!ar.ok) throw new Error(`Zernio accounts ${ar.status}`)
-  return ad.accounts || []
 }
 
 export default async function handler(req, res) {
@@ -120,14 +104,13 @@ export default async function handler(req, res) {
     let accounts = []
     let zerr = null
     if (key) { try { accounts = await connectedAccounts(key, profileId) } catch (e) { zerr = e.message } }
-    const platforms = accounts.map((a) => a.platform)
     return send(res, 200, {
       ready: !!key && accounts.length > 0,
       providerConfigured: status.configured,
       provider: status.provider,
       zernioKey: !!key,
       connectedAccounts: accounts.length,
-      platforms,
+      platforms: accounts.map((a) => a.platform),
       ...(zerr ? { zernioError: zerr } : {}),
     })
   }
@@ -149,54 +132,54 @@ export default async function handler(req, res) {
   const fields = await parseText(text, status)
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
   const caption = await writeCaption(listing, languages, status)
+  const meta = { sender: body?.sender || null, group: body?.group || null }
 
-  const meta = { sender: body?.sender || null, group: body?.group || null, at: null }
-
-  // Dry run — parse + caption only, no posting. Lets us test wiring safely.
-  if (body?.auto === false) {
-    return send(res, 200, { ok: true, posted: false, dryRun: true, listing, caption, media, meta })
+  // Wiring test — parse + caption only. No card, no store, no post.
+  if (body?.dry === true) {
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta })
   }
 
-  // A property post needs a photo. Text-only listings are held (not posted).
+  // A property post needs a photo.
   if (!media.length) {
-    return send(res, 200, { ok: false, posted: false, reason: 'No photo in the message — nothing posted', listing, caption, meta })
-  }
-  if (!key) {
-    return send(res, 200, { ok: false, posted: false, reason: 'ZERNIO_API_KEY not set', listing, caption, media, meta })
+    return send(res, 200, { ok: false, held: false, reason: 'No photo in the message — nothing prepared', listing, caption, meta })
   }
 
-  // 3) Full-auto post to the central brand account's connected socials.
+  // Render the branded cover + final media once (the approver sees the real thing).
+  const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, body?.brand, body?.card !== false)
+  const feedBase = {
+    location: listing.location || null,
+    price: listing.price ?? null,
+    listingType: listing.listingType,
+    card: card || null,
+    cover: card || media[0]?.url || null,
+    caption: (caption || '').slice(0, 180),
+    group: meta.group || null,
+  }
+
+  // AUTO mode — publish now, skipping approval.
+  if (body?.auto === true) {
+    const r = await postToConnected({ caption, mediaItems, key, profileId })
+    if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
+    await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
+    return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
+  }
+
+  // REVIEW mode (default) — hold the finished post for a human ✅.
   try {
-    const accounts = await connectedAccounts(key, profileId)
-    if (!accounts.length) {
-      return send(res, 200, { ok: false, posted: false, reason: 'No connected accounts on the central profile yet', listing, caption, media, meta })
-    }
-    const platforms = accounts.map((a) => ({ platform: a.platform, accountId: a._id }))
-    const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, body?.brand, body?.card !== false)
-    const post = { content: caption, mediaItems, platforms, publishNow: true }
-    const pr = await fetch(`${ZERNIO}/posts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify(post),
-    })
-    const ptext = await pr.text().catch(() => '')
-    if (!pr.ok) return send(res, 502, { ok: false, posted: false, error: `Zernio post ${pr.status}: ${ptext.slice(0, 200)}`, listing, caption })
-
-    const postedPlatforms = platforms.map((p) => p.platform)
-    await appendFeed({
+    const pendingId = await putPending({
       at: new Date().toISOString(),
-      location: listing.location || null,
-      price: listing.price ?? null,
-      listingType: listing.listingType,
-      platforms: postedPlatforms,
-      card: card || null,
-      cover: card || media[0]?.url || null,
+      caption,
+      mediaItems,
+      ...feedBase,
       mediaCount: mediaItems.length,
-      caption: (caption || '').slice(0, 180),
-      group: meta.group || null,
+      sender: meta.sender,
     })
-    return send(res, 200, { ok: true, posted: postedPlatforms, listing, caption, mediaCount: mediaItems.length, card: card || null, ...(cardError ? { cardError } : {}), meta })
+    return send(res, 200, {
+      ok: true, mode: 'review', pendingId,
+      caption, card: card || null, cover: feedBase.cover,
+      ...(cardError ? { cardError } : {}), meta,
+    })
   } catch (e) {
-    return send(res, 502, { ok: false, posted: false, error: 'Zernio unreachable: ' + (e?.message || String(e)), listing, caption })
+    return send(res, 502, { ok: false, error: 'Could not hold for approval: ' + (e?.message || String(e)), listing, caption })
   }
 }

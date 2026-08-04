@@ -30,8 +30,30 @@ export default function FeedPage() {
 
   const status = data?.status
   const posts = data?.posts || []
+  const pending = data?.pending || []
   const accountsOn = (status?.connectedAccounts || 0) > 0
   const live = !!status?.providerConfigured
+
+  const card = (p, i, isPending) => (
+    <article className={`feed-card ${isPending ? 'is-pending' : ''}`} key={(p.id || p.at || i) + (isPending ? 'p' : '')}>
+      {p.cover ? <img className="feed-thumb" src={p.cover} alt="" loading="lazy" /> : <div className="feed-thumb feed-thumb-empty" />}
+      <div className="feed-body">
+        <div className="feed-row1">
+          <span className="feed-price">{money(p.price, p.listingType)}</span>
+          <span className="feed-time">{timeAgo(p.at)}</span>
+        </div>
+        {p.location ? <div className="feed-loc">{p.location}</div> : null}
+        {p.caption ? <div className="feed-cap">{p.caption}</div> : null}
+        {isPending ? (
+          <div className="feed-wait">⏳ Waiting for your ✅ in WhatsApp</div>
+        ) : (
+          <div className="feed-plats">
+            {(p.platforms || []).map((pl) => <span className="feed-plat" key={pl}>{PLAT[pl] || pl}</span>)}
+          </div>
+        )}
+      </div>
+    </article>
+  )
 
   return (
     <div className="container feed">
@@ -54,25 +76,21 @@ export default function FeedPage() {
 
       {loading ? (
         <div className="feed-empty"><p className="muted">Loading…</p></div>
-      ) : posts.length ? (
-        <div className="feed-list">
-          {posts.map((p, i) => (
-            <article className="feed-card" key={p.at || i}>
-              {p.cover ? <img className="feed-thumb" src={p.cover} alt="" loading="lazy" /> : <div className="feed-thumb feed-thumb-empty" />}
-              <div className="feed-body">
-                <div className="feed-row1">
-                  <span className="feed-price">{money(p.price, p.listingType)}</span>
-                  <span className="feed-time">{timeAgo(p.at)}</span>
-                </div>
-                {p.location ? <div className="feed-loc">{p.location}</div> : null}
-                {p.caption ? <div className="feed-cap">{p.caption}</div> : null}
-                <div className="feed-plats">
-                  {(p.platforms || []).map((pl) => <span className="feed-plat" key={pl}>{PLAT[pl] || pl}</span>)}
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
+      ) : pending.length || posts.length ? (
+        <>
+          {pending.length ? (
+            <div className="feed-section">
+              <div className="feed-sec-head">Awaiting your ✅ <span className="feed-count">{pending.length}</span></div>
+              <div className="feed-list">{pending.map((p, i) => card(p, i, true))}</div>
+            </div>
+          ) : null}
+          {posts.length ? (
+            <div className="feed-section">
+              {pending.length ? <div className="feed-sec-head">Posted</div> : null}
+              <div className="feed-list">{posts.map((p, i) => card(p, i, false))}</div>
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="feed-empty">
           <div className="feed-empty-icon" aria-hidden="true">
@@ -101,9 +119,17 @@ export default function FeedPage() {
         .fs-pill.warn { color: var(--timber-600, #b06a2c); background: color-mix(in srgb, var(--timber-500) 14%, transparent); border-color: transparent; }
         .fs-pill.muted-pill { color: var(--ink-500); }
 
+        .feed-section { display: flex; flex-direction: column; gap: 10px; }
+        .feed-section + .feed-section { margin-top: 20px; }
+        .feed-sec-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; letter-spacing: 0.06em;
+          text-transform: uppercase; color: var(--ink-500); }
+        .feed-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+          background: color-mix(in srgb, var(--timber-500) 20%, transparent); color: var(--timber-600, #b06a2c); font-size: 11px; }
         .feed-list { display: flex; flex-direction: column; gap: 10px; }
         .feed-card { display: flex; gap: 13px; padding: 12px; background: var(--surface); border: 1px solid var(--line);
           border-radius: var(--r-lg); }
+        .feed-card.is-pending { border-color: color-mix(in srgb, var(--timber-500) 45%, var(--line)); background: color-mix(in srgb, var(--timber-500) 6%, var(--surface)); }
+        .feed-wait { font-size: 12px; font-weight: 700; color: var(--timber-600, #b06a2c); margin-top: 5px; }
         .feed-thumb { width: 88px; height: 88px; flex: none; object-fit: cover; border-radius: var(--r-md); background: var(--surface-sunk); }
         .feed-thumb-empty { display: block; }
         .feed-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }

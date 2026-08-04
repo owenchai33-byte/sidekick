@@ -4,6 +4,7 @@
 // Nothing sensitive is exposed (no phone numbers; captions are trimmed at write).
 
 import { readFeed } from './_lib/feed.js'
+import { listPending } from './_lib/pending.js'
 import { providerStatus } from './_lib/providers.js'
 
 const ZERNIO = 'https://zernio.com/api/v1'
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
     } catch { /* leave accounts empty */ }
   }
 
-  const posts = await readFeed(30)
+  const [posts, pending] = await Promise.all([readFeed(30), listPending(20)])
   return send(res, 200, {
     status: {
       providerConfigured: status.configured,
@@ -40,6 +41,10 @@ export default async function handler(req, res) {
       connectedAccounts: accounts.length,
       platforms: accounts.map((a) => a.platform),
     },
+    pending: pending.map((p) => ({
+      id: p.id, at: p.at, location: p.location, price: p.price, listingType: p.listingType,
+      cover: p.cover, caption: p.caption, mediaCount: p.mediaCount, group: p.group,
+    })),
     posts,
   })
 }
