@@ -144,6 +144,9 @@ export default async function handler(req, res) {
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
   const caption = await writeCaption(listing, languages, status)
   const meta = { sender: body?.sender || null, group: body?.group || null }
+  // Per-tenant: post to the sender's own Zernio profile if one was passed
+  // (the agent maps sender → profileId); otherwise the default profile.
+  const postProfile = body?.profileId || profileId
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
@@ -170,7 +173,7 @@ export default async function handler(req, res) {
 
   // AUTO mode — publish now, skipping approval.
   if (body?.auto === true) {
-    const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId })
+    const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
     return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
@@ -186,6 +189,7 @@ export default async function handler(req, res) {
       ...feedBase,
       mediaCount: mediaItems.length,
       sender: meta.sender,
+      profileId: postProfile,
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,
