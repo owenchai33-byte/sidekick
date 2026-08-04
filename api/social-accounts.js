@@ -14,7 +14,8 @@ export default async function handler(req, res) {
   const key = process.env.ZERNIO_API_KEY
   if (!key) return send(res, 501, { error: 'Zernio not connected — set ZERNIO_API_KEY in Vercel' })
 
-  const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  const q = new URL(req.url, 'http://localhost').searchParams
+  const profileId = q.get('profile') || process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
   try {
     const r = await fetch(`${ZERNIO}/accounts?profileId=${encodeURIComponent(profileId)}`, {
       headers: { authorization: `Bearer ${key}` },

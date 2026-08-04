@@ -1,5 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 
+// Per-agent link is `…/#/connect?profile=<id>`. With HashRouter the query lives
+// inside window.location.hash (not .search), so read it from the hash directly.
+function readProfile() {
+  const h = window.location.hash || ''
+  const i = h.indexOf('?')
+  return i === -1 ? '' : (new URLSearchParams(h.slice(i + 1)).get('profile') || '')
+}
+
 // The agent-facing "connect your accounts" portal. Each button starts a hosted
 // OAuth on Zernio's audited app (via /api/social-connect) — the agent authorizes
 // their OWN Facebook/Instagram/TikTok, we never see a password, and there's no
@@ -25,6 +33,14 @@ function PlatformGlyph({ id, color }) {
 }
 
 export default function ConnectPage() {
+  const [profile, setProfile] = useState(readProfile) // per-agent link scopes to their profile
+  useEffect(() => {
+    const on = () => setProfile(readProfile())
+    window.addEventListener('hashchange', on)
+    return () => window.removeEventListener('hashchange', on)
+  }, [])
+  const q = profile ? `profile=${encodeURIComponent(profile)}` : ''
+
   const [accounts, setAccounts] = useState(null) // null while loading
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
@@ -33,13 +49,13 @@ export default function ConnectPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/social-accounts')
+      const r = await fetch('/api/social-accounts' + (q ? `?${q}` : ''))
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Failed to load accounts')
       setAccounts(j.accounts || [])
       setError('')
     } catch (e) { setError(e.message); setAccounts([]) }
-  }, [])
+  }, [q])
 
   // Loads on mount, and again whenever the agent returns to the page (e.g. back
   // from the OAuth redirect). A just-connected account can take a few seconds to
@@ -64,7 +80,7 @@ export default function ConnectPage() {
     setBusy(platform)
     setError('')
     try {
-      const r = await fetch(`/api/social-connect?platform=${platform}&origin=${encodeURIComponent(window.location.origin)}`)
+      const r = await fetch(`/api/social-connect?platform=${platform}&origin=${encodeURIComponent(window.location.origin)}${q ? `&${q}` : ''}`)
       const j = await r.json()
       if (!r.ok || !j.authUrl) throw new Error(j.error || 'Could not start connect')
       window.location.href = j.authUrl // hand off to the platform's login/authorize
@@ -95,7 +111,7 @@ export default function ConnectPage() {
       const r = await fetch('/api/social-broadcast', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ caption: '🏡 SideKick test post — one tap, everywhere. (test — safe to delete)' }),
+        body: JSON.stringify({ caption: '🏡 SideKick test post — one tap, everywhere. (test — safe to delete)', ...(profile ? { profile } : {}) }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Post failed')

@@ -24,10 +24,11 @@ export default async function handler(req, res) {
   const origin = q.get('origin') || ''
   if (!PLATFORMS.includes(platform)) return send(res, 400, { error: 'platform must be one of: ' + PLATFORMS.join(', ') })
 
-  const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  // Per-agent: connect to the profile in the link (?profile=…); else the default.
+  const profileId = q.get('profile') || process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
   const params = new URLSearchParams({ profileId })
-  // Where Zernio sends the agent back after they authorize (back to the portal).
-  if (origin) params.set('redirect_url', `${origin}/#/connect`)
+  // Send the agent back to THEIR profile's connect page after authorizing.
+  if (origin) params.set('redirect_url', `${origin}/#/connect?profile=${profileId}`)
 
   try {
     const r = await fetch(`${ZERNIO}/connect/${platform}?${params}`, { headers: { authorization: `Bearer ${key}` } })

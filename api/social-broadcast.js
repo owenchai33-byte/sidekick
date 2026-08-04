@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   const mediaUrl = body?.mediaUrl || SAMPLE_VIDEO
   const mediaType = body?.mediaType === 'image' ? 'image' : 'video'
   const scheduledFor = body?.scheduledFor || '' // ISO string → schedule instead of post now
-  const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  const profileId = body?.profile || process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
 
   try {
     // Target exactly the accounts this agent has connected.
