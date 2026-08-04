@@ -16,23 +16,38 @@ export async function connectedAccounts(key, profileId) {
 
 /**
  * Publish caption + media to every connected account on a profile.
- * Returns { ok, platforms } on success, or { ok:false, reason|error } — never throws.
+ * TikTok photo posts cap the caption at 90 chars (it's the slideshow title), so
+ * TikTok gets `captionShort` and everyone else the full caption — one Zernio
+ * call per caption variant. Returns { ok, platforms } on success (with
+ * partialErrors if some platform failed), or { ok:false, reason|error }. Never throws.
  */
-export async function postToConnected({ caption, mediaItems, key, profileId }) {
+export async function postToConnected({ caption, captionShort, mediaItems, key, profileId }) {
   if (!key) return { ok: false, reason: 'ZERNIO_API_KEY not set' }
   try {
     const accounts = await connectedAccounts(key, profileId)
     if (!accounts.length) return { ok: false, reason: 'No connected accounts on the central profile yet' }
-    const platforms = accounts.map((a) => ({ platform: a.platform, accountId: a._id }))
-    const post = { content: caption, mediaItems, platforms, publishNow: true }
-    const pr = await fetch(`${ZERNIO}/posts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify(post),
-    })
-    const ptext = await pr.text().catch(() => '')
-    if (!pr.ok) return { ok: false, error: `Zernio post ${pr.status}: ${ptext.slice(0, 200)}` }
-    return { ok: true, platforms: platforms.map((p) => p.platform) }
+
+    const short = (captionShort || caption || '').slice(0, 90)
+    const groups = [
+      { accts: accounts.filter((a) => a.platform === 'tiktok'), content: short },
+      { accts: accounts.filter((a) => a.platform !== 'tiktok'), content: caption },
+    ].filter((g) => g.accts.length)
+
+    const posted = []
+    const errors = []
+    for (const g of groups) {
+      const platforms = g.accts.map((a) => ({ platform: a.platform, accountId: a._id }))
+      const pr = await fetch(`${ZERNIO}/posts`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify({ content: g.content, mediaItems, platforms, publishNow: true }),
+      })
+      const ptext = await pr.text().catch(() => '')
+      if (pr.ok) posted.push(...platforms.map((p) => p.platform))
+      else errors.push(`${platforms.map((p) => p.platform).join('/')}: ${pr.status} ${ptext.slice(0, 120)}`)
+    }
+    if (!posted.length) return { ok: false, error: errors.join(' | ') }
+    return { ok: true, platforms: posted, ...(errors.length ? { partialErrors: errors } : {}) }
   } catch (e) {
     return { ok: false, error: 'Zernio unreachable: ' + (e?.message || String(e)) }
   }

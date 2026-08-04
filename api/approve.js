@@ -60,7 +60,7 @@ export default async function handler(req, res) {
 
   const key = process.env.ZERNIO_API_KEY
   const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
-  const r = await postToConnected({ caption: item.caption, mediaItems: item.mediaItems, key, profileId })
+  const r = await postToConnected({ caption: item.caption, captionShort: item.captionShort, mediaItems: item.mediaItems, key, profileId })
   if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, id, reason: r.reason, error: r.error })
 
   await appendFeed({

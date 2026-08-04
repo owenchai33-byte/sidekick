@@ -70,6 +70,17 @@ async function writeCaption(listing, languages, status) {
   return parts.join('\n\n• • •\n\n')
 }
 
+// A ≤90-char title for platforms that cap the caption (TikTok photo slideshows).
+function shortCaption(listing) {
+  const money = listing.price == null ? '' : (listing.listingType === 'rental'
+    ? `RM${Number(listing.price).toLocaleString('en-MY')}/mo`
+    : `RM${Number(listing.price).toLocaleString('en-MY')}`)
+  const type = listing.propertyType || (listing.listingType === 'rental' ? 'Rental' : 'Property')
+  const loc = listing.location || 'Kuching'
+  const s = `${type} @ ${loc}${money ? ` — ${money}` : ''}`
+  return s.length > 88 ? s.slice(0, 87) + '…' : s
+}
+
 // Best-effort branded card as the cover. Never throws — on any failure the
 // original photos are used so a post is never blocked by the graphic.
 async function withBrandCard(media, listing, brand, enabled) {
@@ -146,6 +157,7 @@ export default async function handler(req, res) {
 
   // Render the branded cover + final media once (the approver sees the real thing).
   const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, body?.brand, body?.card !== false)
+  const captionShort = shortCaption(listing) // ≤90 chars for TikTok photo posts
   const feedBase = {
     location: listing.location || null,
     price: listing.price ?? null,
@@ -158,7 +170,7 @@ export default async function handler(req, res) {
 
   // AUTO mode — publish now, skipping approval.
   if (body?.auto === true) {
-    const r = await postToConnected({ caption, mediaItems, key, profileId })
+    const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
     return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
@@ -169,6 +181,7 @@ export default async function handler(req, res) {
     const pendingId = await putPending({
       at: new Date().toISOString(),
       caption,
+      captionShort,
       mediaItems,
       ...feedBase,
       mediaCount: mediaItems.length,
@@ -177,6 +190,7 @@ export default async function handler(req, res) {
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,
       caption, card: card || null, cover: feedBase.cover,
+      mediaCount: mediaItems.length, photoCount: media.length,
       ...(cardError ? { cardError } : {}), meta,
     })
   } catch (e) {
