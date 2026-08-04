@@ -3,16 +3,16 @@
 // it's safe. Shown once on first load; re-openable from the top-bar "?" button.
 
 const STEPS = [
-  { n: '1', k: 'START', d: 'Paste a listing from WhatsApp — or pick one. SideKick pulls out the price, specs and location.' },
-  { n: '2', k: 'WRITE', d: 'It writes native copy for every platform in EN / 中文 / BM, and builds the graphic, carousel and reel.' },
-  { n: '3', k: 'CONNECT', d: 'Link your Facebook, Instagram and TikTok once. Every agent connects their own accounts.' },
-  { n: '4', k: 'POST', d: 'One tap posts to all of them — or schedule it. You review and approve before anything goes out.' },
+  { n: '1', k: 'CONNECT', d: 'Link your Facebook, Instagram and TikTok once, in Settings. That’s the only setup.' },
+  { n: '2', k: 'THE AGENT WATCHES', d: 'When someone posts a listing in your WhatsApp group, SideKick pulls it in — automatically.' },
+  { n: '3', k: 'IT WRITES & BRANDS', d: 'Native copy in EN / 中文 / BM, plus a branded price-card built from the photo.' },
+  { n: '4', k: 'IT POSTS', d: 'Straight to your socials — no taps. You just watch the Feed.' },
 ]
 
 const TRUST = [
   { t: 'Written natively, not translated', d: 'Each language reads like a local wrote it — not a machine.' },
-  { t: 'A complete content kit per listing', d: 'Caption, branded graphic, carousel and reel — all built for you, ready to post.' },
-  { t: 'You approve before it posts', d: 'Review and edit every word first. Nothing goes out until you tap Post.' },
+  { t: 'Branded price-cards, done for you', d: 'Every post leads with a clean FOR SALE / FOR RENT card — price, location, specs.' },
+  { t: 'Runs hands-free', d: 'A listing in your group is live on your socials in minutes. Nothing to open, nothing to tap.' },
 ]
 
 export default function WelcomeModal({ open, onClose }) {
@@ -26,8 +26,8 @@ export default function WelcomeModal({ open, onClose }) {
 
         <div className="wm-head">
           <span className="wm-logo" role="img" aria-label="SideKick" />
-          <h2>Your listings, ready to post</h2>
-          <p className="wm-tag">In three languages, with nothing left to design — and you approve every word.</p>
+          <h2>Your listings, posted for you</h2>
+          <p className="wm-tag">An agent watches your WhatsApp group and posts every listing to your socials — branded, in three languages, automatically.</p>
         </div>
 
         <div className="wm-steps">

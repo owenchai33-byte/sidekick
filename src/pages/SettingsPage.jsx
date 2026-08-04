@@ -60,6 +60,34 @@ export default function SettingsPage() {
             </div>
             <span className="setup-chev">›</span>
           </Link>
+        </div>
+
+        <div className="setup-sub muted">Manual tools — the agent handles this for you, but they’re here if you need them</div>
+        <div className="setup-links">
+          <Link to="/create" className="setup-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+            <div>
+              <strong>Post a listing manually</strong>
+              <span className="muted">Paste or pick a listing, generate &amp; post yourself</span>
+            </div>
+            <span className="setup-chev">›</span>
+          </Link>
+          <Link to="/listings" className="setup-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10.5 12 4l8 6.5M6 9.5V20h12V9.5" /></svg>
+            <div>
+              <strong>All listings</strong>
+              <span className="muted">Every listing in the app</span>
+            </div>
+            <span className="setup-chev">›</span>
+          </Link>
+          <Link to="/content" className="setup-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16M4 12h16M4 19h10" /></svg>
+            <div>
+              <strong>Content planner</strong>
+              <span className="muted">Tips, festive &amp; area posts (non-listing)</span>
+            </div>
+            <span className="setup-chev">›</span>
+          </Link>
           <Link to="/pipeline" className="setup-link">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18M7 15l3-3 3 2 4-5" /></svg>
             <div>
@@ -176,6 +204,7 @@ export default function SettingsPage() {
       <style>{`
         .settings { display: flex; flex-direction: column; gap: 22px; }
         .setup-links { display: flex; flex-direction: column; gap: 8px; }
+        .setup-sub { font-size: 11.5px; margin: 16px 2px 8px; line-height: 1.4; }
         .setup-link { display: flex; align-items: center; gap: 12px; padding: 13px; border-radius: var(--r-md);
           background: var(--surface-sunk); color: var(--ink-900); text-decoration: none; transition: background 0.15s var(--ease); }
         .setup-link:hover { background: color-mix(in srgb, var(--green-500) 12%, var(--surface-sunk)); }

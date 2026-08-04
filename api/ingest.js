@@ -23,6 +23,7 @@ import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
+import { appendFeed } from './_lib/feed.js'
 import { put } from '@vercel/blob'
 
 const ZERNIO = 'https://zernio.com/api/v1'
@@ -180,7 +181,21 @@ export default async function handler(req, res) {
     })
     const ptext = await pr.text().catch(() => '')
     if (!pr.ok) return send(res, 502, { ok: false, posted: false, error: `Zernio post ${pr.status}: ${ptext.slice(0, 200)}`, listing, caption })
-    return send(res, 200, { ok: true, posted: platforms.map((p) => p.platform), listing, caption, mediaCount: mediaItems.length, card: card || null, ...(cardError ? { cardError } : {}), meta })
+
+    const postedPlatforms = platforms.map((p) => p.platform)
+    await appendFeed({
+      at: new Date().toISOString(),
+      location: listing.location || null,
+      price: listing.price ?? null,
+      listingType: listing.listingType,
+      platforms: postedPlatforms,
+      card: card || null,
+      cover: card || media[0]?.url || null,
+      mediaCount: mediaItems.length,
+      caption: (caption || '').slice(0, 180),
+      group: meta.group || null,
+    })
+    return send(res, 200, { ok: true, posted: postedPlatforms, listing, caption, mediaCount: mediaItems.length, card: card || null, ...(cardError ? { cardError } : {}), meta })
   } catch (e) {
     return send(res, 502, { ok: false, posted: false, error: 'Zernio unreachable: ' + (e?.message || String(e)), listing, caption })
   }

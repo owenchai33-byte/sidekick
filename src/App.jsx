@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/AppShell.jsx'
 import { useApp } from './context/AppContext.jsx'
+import FeedPage from './pages/FeedPage.jsx'
 import ListingsPage from './pages/ListingsPage.jsx'
 import NewListingPage from './pages/NewListingPage.jsx'
 import ListingDetailPage from './pages/ListingDetailPage.jsx'
@@ -21,7 +22,8 @@ export default function App() {
         </div>
       ) : (
         <Routes>
-          <Route path="/" element={<ListingsPage />} />
+          <Route path="/" element={<FeedPage />} />
+          <Route path="/listings" element={<ListingsPage />} />
           <Route path="/new" element={<NewListingPage />} />
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/create" element={<CreatePostPage />} />

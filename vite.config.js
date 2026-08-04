@@ -34,6 +34,7 @@ function devApi(env) {
       mount('social-broadcast')
       mount('social-disconnect')
       mount('ingest')
+      mount('feed')
     },
   }
 }
