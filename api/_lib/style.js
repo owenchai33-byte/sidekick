@@ -37,7 +37,7 @@ export async function saveStyle(profileId, { style, examples }) {
   const data = {
     style: style !== undefined ? String(style || '').slice(0, 4000) : cur.style,
     examples: examples !== undefined
-      ? (Array.isArray(examples) ? examples : []).map((e) => String(e || '').trim()).filter(Boolean).slice(0, 5).map((e) => e.slice(0, 1500))
+      ? (Array.isArray(examples) ? examples : []).map((e) => String(e || '').trim()).filter(Boolean).slice(0, 5).map((e) => e.slice(0, 4000))
       : cur.examples,
     updatedAt: new Date().toISOString(),
   }
