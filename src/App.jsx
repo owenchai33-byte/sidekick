@@ -8,6 +8,7 @@ import ListingDetailPage from './pages/ListingDetailPage.jsx'
 import PipelinePage from './pages/PipelinePage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import ConnectPage from './pages/ConnectPage.jsx'
+import StylePage from './pages/StylePage.jsx'
 import ContentPlanPage from './pages/ContentPlanPage.jsx'
 import InboxPage from './pages/InboxPage.jsx'
 import CreatePostPage from './pages/CreatePostPage.jsx'
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/listing/:id" element={<ListingDetailPage />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/style" element={<StylePage />} />
           <Route path="/content" element={<ContentPlanPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -34,9 +34,17 @@ ${rawText}
 }
 
 /** CONTENT: listing + chosen platforms/languages → native copy per combination. */
-export function buildContentPrompt(listing, platformIds, languageIds) {
+export function buildContentPrompt(listing, platformIds, languageIds, styleGuide) {
   const platforms = platformIds.map((id) => PLATFORM_MAP[id]).filter(Boolean)
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
+
+  // The agent's own trained style — overrides the defaults below when present.
+  const sg = styleGuide || {}
+  const styleRules = (sg.style || '').trim()
+  const styleExamples = Array.isArray(sg.examples) ? sg.examples.filter((e) => e && e.trim()) : []
+  const styleBlock = (styleRules || styleExamples.length)
+    ? `\n\nTHE AGENT'S OWN STYLE — HIGHEST PRIORITY. Follow these exactly; they override any default tone/length/emoji/hashtag guidance below where they conflict:\n${styleRules || '(no written rules — match the examples)'}${styleExamples.length ? `\n\nMatch the voice, length and formatting of these example captions the agent wrote:\n${styleExamples.map((e, i) => `— Example ${i + 1} —\n${e}`).join('\n')}` : ''}`
+    : ''
 
   const facts = [
     `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,
@@ -70,7 +78,7 @@ export function buildContentPrompt(listing, platformIds, languageIds) {
 
 LISTING FACTS:
 ${facts}
-
+${styleBlock}
 Write copy for EACH platform, in its own voice:
 ${platformBriefs}
 

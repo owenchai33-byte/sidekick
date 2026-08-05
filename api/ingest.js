@@ -20,6 +20,7 @@ import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
 import { putPending } from './_lib/pending.js'
+import { getStyle } from './_lib/style.js'
 import { connectedAccounts, postToConnected, DEFAULT_PROFILE } from './_lib/zernio.js'
 import { put } from '@vercel/blob'
 
@@ -58,12 +59,12 @@ async function parseText(text, status) {
 
 // Native caption for the brand account: FB-page copy per requested language,
 // joined with a light divider (falls back to labelled demo copy without a key).
-async function writeCaption(listing, languages, status) {
+async function writeCaption(listing, languages, status, styleGuide) {
   const langs = languages.length ? languages : ['en']
   let content
   if (!status.configured) content = demoContent(listing, ['facebook_page'], langs)
   else {
-    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs))) }
+    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide))) }
     catch { content = demoContent(listing, ['facebook_page'], langs) }
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
@@ -139,14 +140,16 @@ export default async function handler(req, res) {
     ? body.languages
     : (process.env.INGEST_LANGS ? process.env.INGEST_LANGS.split(',').map((s) => s.trim()).filter(Boolean) : ['en'])
 
-  // 1) Parse the free-form message  2) write the caption
-  const fields = await parseText(text, status)
-  const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
-  const caption = await writeCaption(listing, languages, status)
   const meta = { sender: body?.sender || null, group: body?.group || null }
   // Per-tenant: post to the sender's own Zernio profile if one was passed
   // (the agent maps sender → profileId); otherwise the default profile.
   const postProfile = body?.profileId || profileId
+
+  // 1) Parse the message  2) write the caption in THIS agent's trained style
+  const fields = await parseText(text, status)
+  const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
+  const styleGuide = await getStyle(postProfile)
+  const caption = await writeCaption(listing, languages, status, styleGuide)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {

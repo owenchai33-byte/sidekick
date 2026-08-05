@@ -36,6 +36,7 @@ function devApi(env) {
       mount('ingest')
       mount('feed')
       mount('approve')
+      mount('style')
     },
   }
 }

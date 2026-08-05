@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 
 // Per-agent link is `…/#/connect?profile=<id>`. With HashRouter the query lives
 // inside window.location.hash (not .search), so read it from the hash directly.
@@ -129,6 +130,9 @@ export default function ConnectPage() {
         <h1 className="page-title">Connect your accounts</h1>
         <p className="muted">Link your socials once — then post a listing to all of them in a tap. You sign in on each platform yourself; we never see your password.</p>
         {accounts && <div className="connect-count">{connectedCount} of {PLATFORMS.length} connected</div>}
+        <div style={{ marginTop: 12 }}>
+          <Link className="btn btn-subtle btn-sm" to={`/style${q ? `?${q}` : ''}`}>✍️ Set your caption style →</Link>
+        </div>
       </header>
 
       {error && <div className="connect-error">{error}</div>}
