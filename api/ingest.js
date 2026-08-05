@@ -149,9 +149,9 @@ export default async function handler(req, res) {
   const fields = await parseText(text, status)
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
   const styleGuide = await getStyle(postProfile)
-  // The agent's own WhatsApp (the number they text from) becomes the caption's
-  // click-to-chat link — the closest thing to a "WhatsApp button" on FB posts.
-  const contact = meta.sender ? { whatsapp: meta.sender } : null
+  // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
+  // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
+  const contact = null
   const caption = await writeCaption(listing, languages, status, styleGuide, contact)
 
   // Wiring test — parse + caption only. No card, no store, no post.
