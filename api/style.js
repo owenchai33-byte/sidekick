@@ -34,7 +34,11 @@ export default async function handler(req, res) {
     const profile = (body?.profile || '').trim()
     if (!profile) return send(res, 400, { error: 'profile required' })
     try {
-      const saved = await saveStyle(profile, { style: body?.style, examples: body?.examples })
+      // Only pass fields that were actually sent, so saveStyle can merge.
+      const patch = {}
+      if ('style' in (body || {})) patch.style = body.style
+      if ('examples' in (body || {})) patch.examples = body.examples
+      const saved = await saveStyle(profile, patch)
       return send(res, 200, { ok: true, ...saved })
     } catch (e) { return send(res, 502, { error: e?.message || String(e) }) }
   }
