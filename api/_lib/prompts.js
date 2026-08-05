@@ -58,9 +58,25 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     listing.furnishing && `Furnishing: ${listing.furnishing}`,
   ].filter(Boolean).join('\n')
 
+  // When the agent has their own style, IT governs length/tone/format — the
+  // platform's default brief must not fight it (that's the "still came back
+  // short" bug). Without a style, use the platform brief as normal.
+  const styleActive = !!styleRules
   const platformBriefs = platforms
-    .map((p) => `- "${p.id}" (${p.name}): ${p.brief || p.style}`)
+    .map((p) => styleActive
+      ? `- "${p.id}" (${p.name}): write to THE AGENT'S STYLE above — length, detail, tone, emoji and hashtags all come from the style. Just keep it appropriate for ${p.name}.`
+      : `- "${p.id}" (${p.name}): ${p.brief || p.style}`)
     .join('\n')
+
+  // Pass the original message so rich numbers (price history, ROI, floor
+  // breakdown, rental income) survive — the parser only keeps a few fields.
+  const rawBlock = (listing.rawText || '').trim()
+    ? `\n\nAGENT'S ORIGINAL MESSAGE — you MAY use any concrete property facts/numbers written here (price history, bank value, savings %, floor-by-floor sizes, facing, ROI %, rental income, deposit/terms). Use only what is actually written; never invent. IGNORE any person's name or phone in it (e.g. the original lister's contact) — the sign-off comes from the agent's style, not this message:\n"""\n${listing.rawText.trim()}\n"""`
+    : ''
+
+  const lengthRule = styleActive
+    ? "- LENGTH, EMOJI & HASHTAGS: the agent's STYLE above governs — follow it exactly, even if that means a long, detailed, data-rich post with hashtags. Ignore any shorter default where it conflicts."
+    : "- Follow each platform's length, emoji and hashtag rules exactly. Hashtags ONLY on TikTok and Instagram — never on Facebook Page, Marketplace, Mudah or Portals."
 
   const langList = languages
     .map((l) => `"${l.id}" = ${l.native}`)
@@ -77,7 +93,7 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
   return `You are the property copywriter every agent in Kuching, Sarawak wishes they could hire. You write native, natural, high-converting marketing copy — never robotic, never machine-translated, never templated.
 
 LISTING FACTS:
-${facts}
+${facts}${rawBlock}
 ${styleBlock}
 Write copy for EACH platform, in its own voice:
 ${platformBriefs}
@@ -92,7 +108,7 @@ CRAFT STANDARD — write like a real top agent, not a template:
 - Vary sentence length. One strong opening line beats three flat ones.
 - BAN these clichés / AI tells: "nestled", "boasts", "dream home awaits", "won't last long", "a rare gem", "priced to sell", "look no further", "unparalleled", "boasts a".
 - Only use the facts above — never invent amenities, distances, schools or figures. If a fact is missing, write around it. Format money as RM.
-- Follow each platform's length, emoji and hashtag rules exactly. Hashtags ONLY on TikTok and Instagram — never on Facebook Page, Marketplace, Mudah or Portals.
+${lengthRule}
 - End every piece with a clear, on-voice way to contact the agent (DM / WhatsApp / call). Ready to post: no placeholders, no "[insert]", no markdown.
 
 Return ONLY a JSON object — no markdown, no code fences, no commentary — shaped exactly like:
