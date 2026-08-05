@@ -34,7 +34,7 @@ ${rawText}
 }
 
 /** CONTENT: listing + chosen platforms/languages → native copy per combination. */
-export function buildContentPrompt(listing, platformIds, languageIds, styleGuide) {
+export function buildContentPrompt(listing, platformIds, languageIds, styleGuide, contact) {
   const platforms = platformIds.map((id) => PLATFORM_MAP[id]).filter(Boolean)
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
 
@@ -78,6 +78,12 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     ? "- LENGTH, EMOJI & HASHTAGS: the agent's STYLE above governs — follow it exactly, even if that means a long, detailed, data-rich post with hashtags. Ignore any shorter default where it conflicts."
     : "- Follow each platform's length, emoji and hashtag rules exactly. Hashtags ONLY on TikTok and Instagram — never on Facebook Page, Marketplace, Mudah or Portals."
 
+  // The agent's click-to-chat "WhatsApp button": a wa.me link Facebook renders tappable.
+  const wa = String((contact && contact.whatsapp) || '').replace(/[^\d]/g, '')
+  const contactLine = wa
+    ? `- END every post with the agent's WhatsApp click-to-chat link, on its own final line, EXACTLY: https://wa.me/${wa} — on Facebook this becomes a tappable "message on WhatsApp" button. Keep the agent's own sign-off line just before it (e.g. their name / "PM me"). Never alter or omit the link.`
+    : "- End every piece with a clear, on-voice way to contact the agent (DM / WhatsApp / call)."
+
   const langList = languages
     .map((l) => `"${l.id}" = ${l.native}`)
     .join(', ')
@@ -109,7 +115,8 @@ CRAFT STANDARD — write like a real top agent, not a template:
 - BAN these clichés / AI tells: "nestled", "boasts", "dream home awaits", "won't last long", "a rare gem", "priced to sell", "look no further", "unparalleled", "boasts a".
 - Only use the facts above — never invent amenities, distances, schools or figures. If a fact is missing, write around it. Format money as RM.
 ${lengthRule}
-- End every piece with a clear, on-voice way to contact the agent (DM / WhatsApp / call). Ready to post: no placeholders, no "[insert]", no markdown.
+${contactLine}
+- Ready to post: no placeholders, no "[insert]", no markdown.
 
 Return ONLY a JSON object — no markdown, no code fences, no commentary — shaped exactly like:
 {

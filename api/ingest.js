@@ -59,12 +59,12 @@ async function parseText(text, status) {
 
 // Native caption for the brand account: FB-page copy per requested language,
 // joined with a light divider (falls back to labelled demo copy without a key).
-async function writeCaption(listing, languages, status, styleGuide) {
+async function writeCaption(listing, languages, status, styleGuide, contact) {
   const langs = languages.length ? languages : ['en']
   let content
   if (!status.configured) content = demoContent(listing, ['facebook_page'], langs)
   else {
-    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide))) }
+    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact))) }
     catch { content = demoContent(listing, ['facebook_page'], langs) }
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
@@ -149,7 +149,10 @@ export default async function handler(req, res) {
   const fields = await parseText(text, status)
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
   const styleGuide = await getStyle(postProfile)
-  const caption = await writeCaption(listing, languages, status, styleGuide)
+  // The agent's own WhatsApp (the number they text from) becomes the caption's
+  // click-to-chat link — the closest thing to a "WhatsApp button" on FB posts.
+  const contact = meta.sender ? { whatsapp: meta.sender } : null
+  const caption = await writeCaption(listing, languages, status, styleGuide, contact)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
