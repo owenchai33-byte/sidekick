@@ -189,10 +189,10 @@ export default async function handler(req, res) {
   try {
     const pendingId = await putPending({
       at: new Date().toISOString(),
-      caption,
       captionShort,
       mediaItems,
       ...feedBase,
+      caption, // FULL caption — MUST come after ...feedBase (feedBase.caption is only the 180-char feed-log preview)
       mediaCount: mediaItems.length,
       sender: meta.sender,
       profileId: postProfile,
