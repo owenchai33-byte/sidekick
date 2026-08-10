@@ -124,6 +124,34 @@ ${platforms.map((p) => `  "${p.id}": { ${languages.map((l) => `"${l.id}": "..."`
 }`
 }
 
+/** REEL: a punchy TikTok voiceover script + short caption for a listing. */
+export function buildReelPrompt(listing) {
+  const facts = [
+    `Type: ${listing.listingType === 'rental' ? 'For rent (monthly)' : 'For sale'}`,
+    listing.price != null && `Price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''}`,
+    listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
+    listing.propertyType && `Type: ${listing.propertyType}`,
+    listing.bedrooms != null && `${listing.bedrooms} bedrooms`,
+    listing.bathrooms != null && `${listing.bathrooms} bathrooms`,
+    listing.sqft != null && `${listing.sqft} sq ft`,
+    listing.rawText && `Agent's message: ${String(listing.rawText).slice(0, 500)}`,
+  ].filter(Boolean).join('\n')
+
+  return `Write a TikTok reel for this Kuching property. Return ONLY JSON: { "script": "...", "caption": "..." }
+
+LISTING:
+${facts}
+
+"script" = the SPOKEN voiceover, English, energetic and punchy for a 15-20 second TikTok:
+- Open with a 1-line HOOK that stops the scroll (not "check out this property").
+- Then 2-3 punchy selling points using the REAL numbers (price, beds, area, standout feature).
+- End with a fast CTA (e.g. "DM before it's gone").
+- 35-55 words total, ~3-5 short sentences. Spoken style: write numbers as words a voice reads naturally (say "four ninety-eight thousand" not "RM498,000"; "seven ninety-seven square feet"). No emojis, no hashtags, no markdown — it's read aloud.
+- Only use facts above; never invent.
+
+"caption" = the TikTok post caption: 1 short line + 4-6 relevant hashtags (e.g. #KuchingProperty #Sarawak). Emojis ok here.`
+}
+
 /** PLAN: a month of non-listing content posts (tips, area spotlights, festive,
  *  engagement) that keep an agent's feed active between listings. */
 export function buildPlanPrompt(brand, count, languageIds) {

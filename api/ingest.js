@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { buildParsePrompt, buildContentPrompt } from './_lib/prompts.js'
+import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
@@ -69,6 +69,20 @@ async function writeCaption(listing, languages, status, styleGuide, contact) {
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
   return parts.join('\n\n• • •\n\n')
+}
+
+// Punchy TikTok reel script + short caption (falls back to a simple template).
+async function reelScript(listing, status) {
+  if (status.configured) {
+    try {
+      const j = extractJson(await runModel(buildReelPrompt(listing)))
+      if (j && j.script) return { script: String(j.script), caption: String(j.caption || '') }
+    } catch { /* fall through */ }
+  }
+  const money = listing.price != null ? `RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? ' a month' : ''}` : ''
+  const loc = listing.location || 'Kuching'
+  const script = `Looking for a place in ${loc}? This ${listing.propertyType || 'one'}${listing.bedrooms != null ? ` has ${listing.bedrooms} bedrooms` : ''}${money ? `, and it's ${money}` : ''}. Trust me, it won't last long. DM me now before it's gone.`
+  return { script, caption: `${listing.propertyType || 'Property'} in ${loc} ${money ? '— ' + money : ''} 🏡 #KuchingProperty #Sarawak #PropertyMalaysia` }
 }
 
 // A ≤90-char title for platforms that cap the caption (TikTok photo slideshows).
@@ -144,10 +158,26 @@ export default async function handler(req, res) {
   // Per-tenant: post to the sender's own Zernio profile if one was passed
   // (the agent maps sender → profileId); otherwise the default profile.
   const postProfile = body?.profileId || profileId
+  // Optional platform filter (e.g. ['facebook','instagram']) — post only to these.
+  const platforms = Array.isArray(body?.platforms) && body.platforms.length ? body.platforms : null
 
   // 1) Parse the message  2) write the caption in THIS agent's trained style
   const fields = await parseText(text, status)
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
+
+  // TikTok reel mode: return a punchy script + short caption + a rendered card.
+  // The Mac (sidekick.mjs reel) builds the actual video and holds it for approval.
+  if (body?.mode === 'reel') {
+    if (!media.length) return send(res, 200, { ok: false, reason: 'A reel needs photos', listing })
+    const { card } = await withBrandCard(media.slice(0, 1), listing, body?.brand, true)
+    const rs = await reelScript(listing, status)
+    return send(res, 200, {
+      ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
+      card: card || media[0]?.url || null, profileId: postProfile,
+      listing: { price: listing.price ?? null, location: listing.location || null, bedrooms: listing.bedrooms ?? null, bathrooms: listing.bathrooms ?? null, sqft: listing.sqft ?? null, propertyType: listing.propertyType || null, listingType: listing.listingType },
+    })
+  }
+
   const styleGuide = await getStyle(postProfile)
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
@@ -179,7 +209,7 @@ export default async function handler(req, res) {
 
   // AUTO mode — publish now, skipping approval.
   if (body?.auto === true) {
-    const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile })
+    const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
     return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
@@ -196,6 +226,7 @@ export default async function handler(req, res) {
       mediaCount: mediaItems.length,
       sender: meta.sender,
       profileId: postProfile,
+      platforms,
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,

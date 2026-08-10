@@ -21,11 +21,12 @@ export async function connectedAccounts(key, profileId) {
  * call per caption variant. Returns { ok, platforms } on success (with
  * partialErrors if some platform failed), or { ok:false, reason|error }. Never throws.
  */
-export async function postToConnected({ caption, captionShort, mediaItems, key, profileId }) {
+export async function postToConnected({ caption, captionShort, mediaItems, key, profileId, platforms }) {
   if (!key) return { ok: false, reason: 'ZERNIO_API_KEY not set' }
   try {
-    const accounts = await connectedAccounts(key, profileId)
-    if (!accounts.length) return { ok: false, reason: 'No connected accounts on the central profile yet' }
+    let accounts = await connectedAccounts(key, profileId)
+    if (platforms && platforms.length) accounts = accounts.filter((a) => platforms.includes(a.platform))
+    if (!accounts.length) return { ok: false, reason: platforms ? `No ${platforms.join('/')} account connected yet` : 'No connected accounts on the central profile yet' }
 
     const short = (captionShort || caption || '').slice(0, 90)
     const groups = [
