@@ -1,8 +1,7 @@
-// Portal: list the social accounts an agent has connected (via Zernio) for
-// their profile, so the Connect screen can show status and the post flow knows
-// which accountIds to target.  GET /api/social-accounts
-const ZERNIO = 'https://zernio.com/api/v1'
-const DEFAULT_PROFILE = '6a6c498971a67c109cfcae06'
+// Portal: list the social accounts an agent has connected for their profile, so
+// the Connect screen can show status and the post flow knows which accountIds to
+// target.  GET /api/social-accounts?profile=<profileId>
+import { connectedAccounts, defaultProfile, providerConfigured } from './_lib/social.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -11,20 +10,14 @@ function send(res, status, payload) {
 }
 
 export default async function handler(req, res) {
-  const key = process.env.ZERNIO_API_KEY
-  if (!key) return send(res, 501, { error: 'Zernio not connected — set ZERNIO_API_KEY in Vercel' })
+  const { configured } = providerConfigured()
+  if (!configured) return send(res, 501, { error: 'Posting provider not connected — set its API key in Vercel' })
 
   const q = new URL(req.url, 'http://localhost').searchParams
-  const profileId = q.get('profile') || process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  const profileId = q.get('profile') || defaultProfile()
   try {
-    const r = await fetch(`${ZERNIO}/accounts?profileId=${encodeURIComponent(profileId)}`, {
-      headers: { authorization: `Bearer ${key}` },
-    })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) return send(res, 502, { error: `Zernio ${r.status}: ${JSON.stringify(data).slice(0, 150)}` })
-    const accounts = (data.accounts || []).map((a) => ({ id: a._id, platform: a.platform, username: a.username }))
-    return send(res, 200, { accounts })
+    return send(res, 200, { accounts: await connectedAccounts(profileId) })
   } catch (e) {
-    return send(res, 502, { error: 'Zernio unreachable: ' + (e?.message || String(e)) })
+    return send(res, 502, { error: e?.message || String(e) })
   }
 }

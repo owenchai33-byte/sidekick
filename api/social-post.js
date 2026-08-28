@@ -44,20 +44,26 @@ async function postToMake({ caption, imageUrl, mediaUrl, mediaType, platforms })
   }
 }
 
-// TikTok via Zernio. Publishes immediately and public; media is a public URL
-// (our Blob-hosted reel), so no upload step. Pilot posts to one configured
-// account; per-agent account ids come later for the multi-agent rollout.
+// TikTok via the configured posting provider. Publishes immediately and public;
+// media is a public URL (our Blob-hosted reel), so no upload step. Pilot posts to
+// one configured account; per-agent account ids come with the multi-agent rollout.
+// The account id is provider-specific — a Zernio id is meaningless to PostPeer —
+// so each provider reads its own env var.
 async function postToZernio({ caption, mediaUrl, mediaType }) {
-  const key = process.env.ZERNIO_API_KEY
-  // Pilot: default to the connected TikTok account so only ZERNIO_API_KEY must
-  // be configured. Per-agent account ids come with the multi-agent rollout.
-  const accountId = process.env.ZERNIO_TIKTOK_ACCOUNT_ID || '6a6c49fbdf17280d930993f0'
-  if (!key) return { ok: false, error: 'Zernio not connected — set ZERNIO_API_KEY in Vercel' }
+  const isPP = provider() === 'postpeer'
+  const key = isPP ? process.env.POSTPEER_API_KEY : process.env.ZERNIO_API_KEY
+  const accountId = isPP
+    ? process.env.POSTPEER_TIKTOK_ACCOUNT_ID
+    : process.env.ZERNIO_TIKTOK_ACCOUNT_ID || '6a6c49fbdf17280d930993f0'
+  if (!key) return { ok: false, error: `${provider()} not connected — set its API key in Vercel` }
+  if (!accountId) return { ok: false, error: 'Set POSTPEER_TIKTOK_ACCOUNT_ID (the integration id from /connect/integrations)' }
   if (!mediaUrl) return { ok: false, error: 'TikTok needs a video' }
   try {
-    const r = await fetch('https://zernio.com/api/v1/posts', {
+    const r = await fetch(isPP ? 'https://api.postpeer.dev/v1/posts/' : 'https://zernio.com/api/v1/posts', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      headers: isPP
+        ? { 'content-type': 'application/json', 'x-access-key': key }
+        : { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify({
         content: caption,
         mediaItems: [{ url: mediaUrl, type: mediaType === 'video' ? 'video' : 'image' }],
@@ -66,10 +72,10 @@ async function postToZernio({ caption, mediaUrl, mediaType }) {
       }),
     })
     const text = await r.text().catch(() => '')
-    if (!r.ok) return { ok: false, error: `Zernio ${r.status}: ${text.slice(0, 150)}` }
+    if (!r.ok) return { ok: false, error: `${provider()} ${r.status}: ${text.slice(0, 150)}` }
     return { ok: true, status: r.status }
   } catch (e) {
-    return { ok: false, error: 'Zernio unreachable: ' + (e?.message || String(e)) }
+    return { ok: false, error: `${provider()} unreachable: ` + (e?.message || String(e)) }
   }
 }
 

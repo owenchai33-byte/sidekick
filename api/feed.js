@@ -6,9 +6,7 @@
 import { readFeed } from './_lib/feed.js'
 import { listPending } from './_lib/pending.js'
 import { providerStatus } from './_lib/providers.js'
-
-const ZERNIO = 'https://zernio.com/api/v1'
-const DEFAULT_PROFILE = '6a6c498971a67c109cfcae06'
+import { connectedAccounts, defaultProfile, providerConfigured } from './_lib/social.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -20,16 +18,11 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return send(res, 405, { error: 'GET only' })
 
   const status = providerStatus()
-  const key = process.env.ZERNIO_API_KEY
-  const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  const posting = providerConfigured()
 
   let accounts = []
-  if (key) {
-    try {
-      const r = await fetch(`${ZERNIO}/accounts?profileId=${encodeURIComponent(profileId)}`, { headers: { authorization: `Bearer ${key}` } })
-      const d = await r.json().catch(() => ({}))
-      if (r.ok) accounts = d.accounts || []
-    } catch { /* leave accounts empty */ }
+  if (posting.configured) {
+    try { accounts = await connectedAccounts(defaultProfile()) } catch { /* leave accounts empty */ }
   }
 
   const [posts, pending] = await Promise.all([readFeed(30), listPending(20)])
@@ -37,7 +30,9 @@ export default async function handler(req, res) {
     status: {
       providerConfigured: status.configured,
       provider: status.provider,
-      zernioKey: !!key,
+      postingProvider: posting.provider,
+      postingKey: posting.configured,
+      zernioKey: posting.configured, // kept for the existing UI field name
       connectedAccounts: accounts.length,
       platforms: accounts.map((a) => a.platform),
     },
