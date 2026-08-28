@@ -16,7 +16,8 @@ Return ONLY a JSON object — no markdown, no code fences, no commentary — wit
   "bedrooms": number | null,
   "bathrooms": number | null,
   "propertyType": one of "Terrace","Semi-D","Detached","Apartment","Condo","Shoplot","Land" or null,
-  "sqft": number | null,
+  "sqft": number | null,             // BUILT-UP area only. null if only land size is given.
+  "landSqft": number | null,         // LAND area only. Never put land size in "sqft".
   "tenure": "Freehold" | "Leasehold" | null,
   "furnishing": "Unfurnished" | "Partially Furnished" | "Fully Furnished" | null,
   "title": string | null             // a short human label, e.g. "3-room terrace @ Batu Kawa"
@@ -25,6 +26,12 @@ Return ONLY a JSON object — no markdown, no code fences, no commentary — wit
 Rules:
 - Infer listingType from context (words like "for rent", "sewa", "/month", "monthly" => rental; "for sale", "jual", "dijual" => sale). If a price looks monthly and small, it's a rental.
 - Convert "k" to thousands, "juta"/"mil"/"m" to millions.
+- BUILT-UP vs LAND are different numbers and buyers compare them. "built-up",
+  "binaan", "floor area" -> sqft. "land", "tanah", "land area", "lot size" -> landSqft.
+  If the text gives only one and does not say which, prefer landSqft for a landed
+  house (terrace/semi-D/detached) and sqft for an apartment/condo.
+- Malaysian land units: 1 point = 435.6 sq ft (1/100 acre); 1 acre = 43,560 sq ft.
+  So "8.6 points" -> landSqft 3746, NOT sqft.
 - If a field is genuinely absent, use null. Never invent values.
 
 Listing text:
@@ -53,7 +60,8 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     listing.propertyType && `Property type: ${listing.propertyType}`,
     listing.bedrooms != null && `Bedrooms: ${listing.bedrooms}`,
     listing.bathrooms != null && `Bathrooms: ${listing.bathrooms}`,
-    listing.sqft != null && `Built-up: ${listing.sqft} sq ft`,
+    listing.sqft != null && `Built-up area: ${listing.sqft} sq ft`,
+    listing.landSqft != null && `LAND area: ${listing.landSqft} sq ft (this is LAND, not built-up — never describe it as built-up or floor area)`,
     listing.tenure && `Tenure: ${listing.tenure}`,
     listing.furnishing && `Furnishing: ${listing.furnishing}`,
   ].filter(Boolean).join('\n')
