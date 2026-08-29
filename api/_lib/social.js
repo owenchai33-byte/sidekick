@@ -57,9 +57,16 @@ const missingKey = () =>
 export async function connectedAccounts(profileId) {
   if (!apiKey()) throw new Error(missingKey())
   const pid = profileId || defaultProfile()
+  // NEVER fall through to "every account in the project". PostPeer lists all
+  // integrations when no profileId is sent, so an unresolved profile used to
+  // silently return ANOTHER TENANT'S accounts — which meant postToConnected
+  // would have published one agent's listing to every agent's socials. There is
+  // no safe default here: each agent's profile comes from tools/tenants.json.
+  if (provider() === 'postpeer' && !pid) {
+    throw new Error('no profile for this sender — add their phone → profileId in tools/tenants.json (or set POSTPEER_PROFILE_ID)')
+  }
   if (provider() === 'postpeer') {
-    const qs = new URLSearchParams({ limit: '100' })
-    if (pid) qs.set('profileId', pid)
+    const qs = new URLSearchParams({ limit: '100', profileId: pid })
     const r = await fetch(`${POSTPEER}/connect/integrations?${qs}`, { headers: authHeaders() })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(`PostPeer integrations ${r.status}`)
