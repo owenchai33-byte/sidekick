@@ -1,9 +1,17 @@
-// The agent's caption-style control.
-//   GET  /api/style?profile=<id>            → { style, examples }
-//   POST /api/style { profile, style, examples } → saves, returns the saved value
-// Scoped by Zernio profile (each agent edits their own via their link).
-
+// Per-agent settings the agent controls: their caption STYLE and their BRAND
+// (accent colour + name on the price card).
+//
+// Both live behind ONE function on purpose: Vercel's Hobby plan allows 12
+// serverless functions per deployment and a separate /api/brand took the project
+// to 13, which fails at "Deploying outputs" AFTER a successful build — an easy
+// failure to misread as a code error. Keep new per-profile settings here.
+//
+//   GET  /api/style?profile=<id>              → { style, examples }
+//   GET  /api/style?profile=<id>&kind=brand   → { color, name }
+//   POST /api/style { profile, style, examples }        → saves the style
+//   POST /api/style { profile, kind:"brand", color, name } → saves the brand
 import { getStyle, saveStyle } from './_lib/style.js'
+import { getBrand, saveBrand } from './_lib/brand.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -25,22 +33,23 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const profile = url.searchParams.get('profile') || ''
     if (!profile) return send(res, 400, { error: 'profile required' })
+    if ((url.searchParams.get('kind') || '') === 'brand') return send(res, 200, await getBrand(profile))
     return send(res, 200, await getStyle(profile))
   }
 
   if (req.method === 'POST') {
     let body
-    try { body = req.body ?? (await readJson(req)) } catch { return send(res, 400, { error: 'Invalid JSON' }) }
+    try { body = await readJson(req) } catch { return send(res, 400, { error: 'Invalid JSON' }) }
     const profile = (body?.profile || '').trim()
     if (!profile) return send(res, 400, { error: 'profile required' })
     try {
-      // Only pass fields that were actually sent, so saveStyle can merge.
-      const patch = {}
-      if ('style' in (body || {})) patch.style = body.style
-      if ('examples' in (body || {})) patch.examples = body.examples
-      const saved = await saveStyle(profile, patch)
-      return send(res, 200, { ok: true, ...saved })
-    } catch (e) { return send(res, 502, { error: e?.message || String(e) }) }
+      if (body?.kind === 'brand') {
+        return send(res, 200, await saveBrand(profile, { color: body?.color, name: body?.name }))
+      }
+      return send(res, 200, await saveStyle(profile, { style: body?.style, examples: body?.examples }))
+    } catch (e) {
+      return send(res, 400, { error: e?.message || String(e) })
+    }
   }
 
   return send(res, 405, { error: 'GET or POST only' })
