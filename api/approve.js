@@ -9,9 +9,9 @@
 //           feed, removes it from pending.
 // skip    → just removes it from pending.
 
-import { getPending, delPending } from './_lib/pending.js'
+import { getPending, delPending, claimPending, releasePending } from './_lib/pending.js'
 import { appendFeed } from './_lib/feed.js'
-import { postToConnected, DEFAULT_PROFILE } from './_lib/zernio.js'
+import { postToConnected } from './_lib/social.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -58,11 +58,23 @@ export default async function handler(req, res) {
   }
   if (decision !== 'approve') return send(res, 400, { error: `Unclear decision "${decision}" — use approve or skip` })
 
-  const key = process.env.ZERNIO_API_KEY
-  // Post to the tenant's own profile captured at ingest time (falls back to default).
-  const profileId = item.profileId || process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
-  const r = await postToConnected({ caption: item.caption, captionShort: item.captionShort, mediaItems: item.mediaItems, key, profileId, platforms: item.platforms })
-  if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, id, reason: r.reason, error: r.error })
+  // The tenant's own profile, captured at ingest. NO fallback: publishing to a
+  // default profile means publishing to somebody else's accounts.
+  const profileId = item.profileId
+  if (!profileId) return send(res, 400, { ok: false, id, error: 'this held post has no profile — cannot publish safely' })
+
+  // Take an ATOMIC claim before publishing. Read-then-delete is two operations, so
+  // two ✅ arriving together both saw the item and both published — measured. The
+  // claim is a single test-and-set, so exactly one caller ever gets through.
+  if (!(await claimPending(id))) {
+    return send(res, 200, { ok: false, id, alreadyHandled: true, error: 'already being published — ignoring the duplicate ✅' })
+  }
+  const r = await postToConnected({ caption: item.caption, captionShort: item.captionShort, mediaItems: item.mediaItems, profileId, platforms: item.platforms })
+  if (!r.ok) {
+    // Nothing was published: drop the claim and leave it pending so they can retry.
+    await releasePending(id)
+    return send(res, r.error ? 502 : 200, { ok: false, id, reason: r.reason, error: r.error, retryable: true })
+  }
 
   await appendFeed({
     at: new Date().toISOString(),
@@ -77,5 +89,6 @@ export default async function handler(req, res) {
     group: item.group ?? null,
   })
   await delPending(id)
-  return send(res, 200, { ok: true, decision: 'approve', posted: r.platforms, id })
+  await releasePending(id)
+  return send(res, 200, { ok: true, decision: 'approve', posted: r.platforms, id, ...(r.partialErrors ? { partialErrors: r.partialErrors } : {}) })
 }
