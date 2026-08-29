@@ -21,7 +21,7 @@ import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
 import { putPending } from './_lib/pending.js'
 import { getStyle } from './_lib/style.js'
-import { connectedAccounts, postToConnected, DEFAULT_PROFILE } from './_lib/zernio.js'
+import { connectedAccounts, postToConnected, defaultProfile } from './_lib/social.js'
 import { put } from '@vercel/blob'
 
 function send(res, status, payload) {
@@ -123,7 +123,7 @@ export default async function handler(req, res) {
 
   const status = providerStatus()
   const key = process.env.ZERNIO_API_KEY
-  const profileId = process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+  const profileId = defaultProfile()
 
   // Readiness check — verify wiring without posting.
   if (req.method === 'GET') {
@@ -155,9 +155,13 @@ export default async function handler(req, res) {
     : (process.env.INGEST_LANGS ? process.env.INGEST_LANGS.split(',').map((s) => s.trim()).filter(Boolean) : ['en'])
 
   const meta = { sender: body?.sender || null, group: body?.group || null }
-  // Per-tenant: post to the sender's own Zernio profile if one was passed
-  // (the agent maps sender → profileId); otherwise the default profile.
+  // Per-tenant: post to the sender's OWN profile (the agent maps sender → profileId
+  // from tools/tenants.json). There is no safe fallback — the wrong profile means
+  // the wrong accounts AND the wrong caption style, and both fail quietly.
   const postProfile = body?.profileId || profileId
+  if (!postProfile) {
+    return send(res, 400, { ok: false, error: 'no profile for this sender — add their phone → profileId in tools/tenants.json' })
+  }
   // Optional platform filter (e.g. ['facebook','instagram']) — post only to these.
   const platforms = Array.isArray(body?.platforms) && body.platforms.length ? body.platforms : null
 
@@ -179,6 +183,10 @@ export default async function handler(req, res) {
   }
 
   const styleGuide = await getStyle(postProfile)
+  // Report whether a trained style was actually found. A missing style does not
+  // error — it silently produces generic copy, which is exactly how an orphaned
+  // style went unnoticed after a provider switch. Surface it so the agent can say so.
+  const styleApplied = !!(styleGuide.style || (styleGuide.examples || []).length)
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
@@ -232,6 +240,8 @@ export default async function handler(req, res) {
       ok: true, mode: 'review', pendingId,
       caption, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
+      styleApplied, profileId: postProfile,
+      ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
       ...(cardError ? { cardError } : {}), meta,
     })
   } catch (e) {
