@@ -121,6 +121,20 @@ CRAFT STANDARD — write like a real top agent, not a template:
 - Be specific and concrete. Use the real numbers and help the reader picture living there.
 - Vary sentence length. One strong opening line beats three flat ones.
 - BAN these clichés / AI tells: "nestled", "boasts", "dream home awaits", "won't last long", "a rare gem", "priced to sell", "look no further", "unparalleled", "boasts a".
+- NO INVENTED CLAIMS. This is the most important rule and it is broken most often.
+  Everything you write must be traceable to a fact above. In particular NEVER assert:
+  * who it suits ("ideal for a young professional", "perfect for a small family",
+    "great for investors") — you do not know who the buyer is;
+  * views, light or outlook ("stunning views", "wake up to the sunrise", "bright and
+    airy") unless the listing actually says so — a floor number is NOT a view;
+  * location benefits ("close to schools", "minutes from town", "convenient access")
+    unless a distance or place is actually given;
+  * condition or feeling not stated ("cosy", "spacious", "modern", "luxurious") —
+    say the SQ FT, not "spacious".
+  If it is not in the facts, leave it out. A short honest post beats a padded one.
+- USE the specifics the agent actually gave — floor/level, "negotiable", furnishing,
+  tenure, deposit terms, the agent's own name and number. Those are what make a post
+  read like a real agent wrote it; dropping them for lifestyle filler is the failure.
 - Only use the facts above — never invent amenities, distances, schools or figures. If a fact is missing, write around it. Format money as RM.
 ${lengthRule}
 ${contactLine}
@@ -155,7 +169,10 @@ ${facts}
 - Then 2-3 punchy selling points using the REAL numbers (price, beds, area, standout feature).
 - End with a fast CTA (e.g. "DM before it's gone").
 - 35-55 words total, ~3-5 short sentences. Spoken style: write numbers as words a voice reads naturally (say "four ninety-eight thousand" not "RM498,000"; "seven ninety-seven square feet"). No emojis, no hashtags, no markdown — it's read aloud.
-- Only use facts above; never invent.
+- Only use facts above; never invent. NO invented views, no invented buyer type
+  ("perfect for young professionals"), no invented nearby amenities. A floor number
+  is not a view. If the listing says "negotiable" or gives a floor, USE those — real
+  specifics are what make it sound like an agent instead of an advert.
 
 "caption" = the TikTok post caption: 1 short line + 4-6 relevant hashtags (e.g. #KuchingProperty #Sarawak). Emojis ok here.`
 }
