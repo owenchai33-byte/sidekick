@@ -151,7 +151,47 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
       })
       const t = await r.text().catch(() => '')
       if (!r.ok) return { ok: false, error: `PostPeer ${r.status} ${t.slice(0, 200)}` }
-      return { ok: true, platforms: targets.map((p) => p.platform) }
+
+      // The response is 202 Accepted and carries per-platform results. Reporting
+      // "posted to all" just because the HTTP call worked is how a listing that
+      // failed on Instagram gets announced as published everywhere. Read the body.
+      let d = {}
+      try { d = JSON.parse(t) } catch { /* fall through to the optimistic path */ }
+      let status = d.status
+      let plats = Array.isArray(d.platforms) ? d.platforms : []
+
+      // Publishing is asynchronous: a fresh post is usually "publishing". Poll
+      // briefly for a terminal state rather than guessing.
+      if (d.postId && (status === 'publishing' || status === 'pending' || !status)) {
+        for (let i = 0; i < 6; i++) {
+          await new Promise((res) => setTimeout(res, 2000))
+          try {
+            const g = await fetch(`${POSTPEER}/posts/${encodeURIComponent(d.postId)}`, { headers: authHeaders() })
+            if (!g.ok) break
+            const gj = await g.json()
+            const post = gj.post || {}
+            status = post.status || status
+            if (Array.isArray(post.platforms)) plats = post.platforms
+            if (status === 'published' || status === 'failed' || status === 'partial') break
+          } catch { break }
+        }
+      }
+
+      const ok2 = (x) => x.success === true || x.status === 'published'
+      const posted = plats.filter(ok2).map((x) => x.platform)
+      const failed = plats.filter((x) => !ok2(x))
+        .map((x) => `${x.platform}: ${x.errorMessage || x.error || x.status || 'failed'}`)
+      const urls = plats.filter(ok2).filter((x) => x.platformPostUrl)
+        .map((x) => `${x.platform}: ${x.platformPostUrl}`)
+
+      // No per-platform detail came back — stay optimistic but say which state we saw.
+      if (!plats.length) return { ok: true, platforms: targets.map((p) => p.platform), postId: d.postId, status }
+      if (!posted.length) return { ok: false, error: failed.join(' | ') || `PostPeer status ${status}`, postId: d.postId }
+      return {
+        ok: true, platforms: posted, postId: d.postId, status,
+        ...(failed.length ? { partialErrors: failed } : {}),
+        ...(urls.length ? { postUrls: urls } : {}),
+      }
     }
 
     // Zernio: one call per caption variant.
