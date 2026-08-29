@@ -21,6 +21,7 @@ import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
 import { putPending } from './_lib/pending.js'
 import { getStyle } from './_lib/style.js'
+import { getBrand } from './_lib/brand.js'
 import { connectedAccounts, postToConnected, defaultProfile } from './_lib/social.js'
 import { put } from '@vercel/blob'
 
@@ -165,6 +166,14 @@ export default async function handler(req, res) {
   // Optional platform filter (e.g. ['facebook','instagram']) — post only to these.
   const platforms = Array.isArray(body?.platforms) && body.platforms.length ? body.platforms : null
 
+  // Branding is per-agent for the same reason the caption style is: 100 agents on
+  // one system must not share one look. Loaded BEFORE the reel branch so the reel's
+  // card is branded too. An explicit body.brand still wins (the app preview passes
+  // one); otherwise the agent's saved brand; env vars are the last resort.
+  const savedBrand = await getBrand(postProfile)
+  const brand = { ...savedBrand, ...(body?.brand || {}) }
+  const brandApplied = !!(savedBrand.color || savedBrand.name)
+
   // 1) Parse the message  2) write the caption in THIS agent's trained style
   const fields = await parseText(text, status)
   const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
@@ -173,11 +182,11 @@ export default async function handler(req, res) {
   // The Mac (sidekick.mjs reel) builds the actual video and holds it for approval.
   if (body?.mode === 'reel') {
     if (!media.length) return send(res, 200, { ok: false, reason: 'A reel needs photos', listing })
-    const { card } = await withBrandCard(media.slice(0, 1), listing, body?.brand, true)
+    const { card } = await withBrandCard(media.slice(0, 1), listing, brand, true)
     const rs = await reelScript(listing, status)
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
-      card: card || media[0]?.url || null, profileId: postProfile,
+      card: card || media[0]?.url || null, profileId: postProfile, brandApplied,
       listing: { price: listing.price ?? null, location: listing.location || null, bedrooms: listing.bedrooms ?? null, bathrooms: listing.bathrooms ?? null, sqft: listing.sqft ?? null, propertyType: listing.propertyType || null, listingType: listing.listingType },
     })
   }
@@ -203,7 +212,7 @@ export default async function handler(req, res) {
   }
 
   // Render the branded cover + final media once (the approver sees the real thing).
-  const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, body?.brand, body?.card !== false)
+  const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, brand, body?.card !== false)
   const captionShort = shortCaption(listing) // ≤90 chars for TikTok photo posts
   const feedBase = {
     location: listing.location || null,
@@ -240,7 +249,7 @@ export default async function handler(req, res) {
       ok: true, mode: 'review', pendingId,
       caption, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
-      styleApplied, profileId: postProfile,
+      styleApplied, brandApplied, profileId: postProfile,
       ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
       ...(cardError ? { cardError } : {}), meta,
     })
