@@ -203,7 +203,9 @@ export default async function handler(req, res) {
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
-    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta })
+    // Report the same flags as a real post — the dry path is what the health check
+    // and any wiring test uses, so it must not look healthier than the real thing.
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, profileId: postProfile })
   }
 
   // A property post needs a photo.
