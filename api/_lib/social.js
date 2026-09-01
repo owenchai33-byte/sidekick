@@ -19,6 +19,8 @@
 //   * connect param    redirect_url                     redirectUri
 //   * disconnect       DELETE /accounts/{id}            DELETE /connect/integrations/{id}
 
+import { postFingerprint, claimPostOnce, releasePostOnce, looksLikeDemoCaption } from './postguard.js'
+
 const ZERNIO = 'https://zernio.com/api/v1'
 const POSTPEER = 'https://api.postpeer.dev/v1'
 
@@ -128,8 +130,18 @@ export async function disconnect(accountId) {
  * Returns { ok, platforms } (with partialErrors if some platform failed) or
  * { ok:false, reason|error }. Never throws — callers report, they don't crash.
  */
-export async function postToConnected({ caption, captionShort, mediaItems, profileId, platforms }) {
+export async function postToConnected({ caption, captionShort, mediaItems, profileId, platforms, allowDemo }) {
   if (!apiKey()) return { ok: false, reason: missingKey() }
+  // Never publish the demo fallback under an agent's name, whatever route got
+  // here. On 2026-09-01 boilerplate went live on FB and IG because the caller
+  // decided for itself that posting something was better than posting nothing.
+  if (!allowDemo && looksLikeDemoCaption(caption)) {
+    return { ok: false, blocked: 'captionDegraded', reason: 'this is the demo fallback caption, not a real one - refusing to publish it' }
+  }
+  const fp = postFingerprint({ profileId, caption, platforms, mediaItems })
+  if (!(await claimPostOnce(fp))) {
+    return { ok: false, duplicate: true, reason: 'an identical post just went out - ignoring this repeat' }
+  }
   try {
     let accounts = await connectedAccounts(profileId)
     if (platforms && platforms.length) accounts = accounts.filter((a) => platforms.includes(a.platform))
@@ -216,6 +228,7 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
     if (!posted.length) return { ok: false, error: errors.join(' | ') }
     return { ok: true, platforms: posted, ...(errors.length ? { partialErrors: errors } : {}) }
   } catch (e) {
+    await releasePostOnce(fp)
     return { ok: false, error: `${provider()} unreachable: ` + (e?.message || String(e)) }
   }
 }
