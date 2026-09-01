@@ -1,0 +1,7 @@
+# Vercel's Node builder turns api/**/*.{js,mjs,ts} into serverless functions, and
+# the Hobby plan caps them at 12 — we are AT 12. A stray test file next to a route
+# silently pushes it to 13 and the deploy fails at "Deploying outputs", which has
+# already happened once. Tests never belong in the deployment.
+*.test.mjs
+*.test.js
+*.check.mjs

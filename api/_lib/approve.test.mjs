@@ -5,11 +5,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const pending = { getPending: vi.fn(), delPending: vi.fn(), claimPending: vi.fn(), releasePending: vi.fn() }
 const social = { postToConnected: vi.fn() }
-vi.mock('./_lib/pending.js', () => pending)
-vi.mock('./_lib/social.js', () => social)
-vi.mock('./_lib/feed.js', () => ({ appendFeed: vi.fn() }))
+vi.mock('./pending.js', () => pending)
+vi.mock('./social.js', () => social)
+vi.mock('./feed.js', () => ({ appendFeed: vi.fn() }))
 
-const { default: handler } = await import('./approve.js')
+const { default: handler } = await import('../approve.js')
 
 const mkRes = () => {
   const r = { statusCode: 0, body: null, headers: {} }
