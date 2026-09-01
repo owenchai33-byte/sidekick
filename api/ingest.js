@@ -60,16 +60,20 @@ async function parseText(text, status) {
 
 // Native caption for the brand account: FB-page copy per requested language,
 // joined with a light divider (falls back to labelled demo copy without a key).
+// Returns { caption, degraded }. `degraded` means the model call FAILED and this is
+// demo boilerplate, not the agent's real copy. It used to fall back silently, so a
+// Gemini 429 meant every agent posted generic demo text with nothing to indicate it.
+// A missing caption is obvious; a plausible wrong one is not.
 async function writeCaption(listing, languages, status, styleGuide, contact) {
   const langs = languages.length ? languages : ['en']
-  let content
-  if (!status.configured) content = demoContent(listing, ['facebook_page'], langs)
+  let content, degraded = false
+  if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   else {
     try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact))) }
-    catch { content = demoContent(listing, ['facebook_page'], langs) }
+    catch { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
-  return parts.join('\n\n• • •\n\n')
+  return { caption: parts.join('\n\n• • •\n\n'), degraded }
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
@@ -199,13 +203,13 @@ export default async function handler(req, res) {
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
-  const caption = await writeCaption(listing, languages, status, styleGuide, contact)
+  const { caption, degraded: captionDegraded } = await writeCaption(listing, languages, status, styleGuide, contact)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
     // Report the same flags as a real post — the dry path is what the health check
     // and any wiring test uses, so it must not look healthier than the real thing.
-    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, profileId: postProfile })
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile })
   }
 
   // A property post needs a photo.
@@ -251,7 +255,8 @@ export default async function handler(req, res) {
       ok: true, mode: 'review', pendingId,
       caption, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
-      styleApplied, brandApplied, profileId: postProfile,
+      styleApplied, brandApplied, profileId: postProfile, captionDegraded,
+      ...(captionDegraded ? { captionWarning: 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
       ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
       ...(cardError ? { cardError } : {}), meta,
     })
