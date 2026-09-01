@@ -166,7 +166,13 @@ ${facts}
 
 "script" = the SPOKEN voiceover, English, energetic and punchy for a 15-20 second TikTok:
 - Open with a 1-line HOOK that stops the scroll (not "check out this property").
-- Then 2-3 punchy selling points using the REAL numbers (price, beds, area, standout feature).
+- Then 2-3 punchy selling points. IMPORTANT: the price, bedrooms, bathrooms and
+  square footage are ALREADY shown on screen for the whole video in a caption bar.
+  Reading them out as well makes the reel feel cluttered and repetitive — the
+  viewer sees and hears the same three facts at once. Say the price at most ONCE
+  (it is the headline), and do NOT recite beds/baths/sqft. Spend the words on what
+  the numbers cannot show: the standout feature, the condition, the location's
+  practical advantage, who it suits based ONLY on stated facts.
 - End with a fast CTA (e.g. "DM before it's gone").
 - 35-55 words total, ~3-5 short sentences. Spoken style: write numbers as words a voice reads naturally (say "four ninety-eight thousand" not "RM498,000"; "seven ninety-seven square feet"). No emojis, no hashtags, no markdown — it's read aloud.
 - Only use facts above; never invent. NO invented views, no invented buyer type
