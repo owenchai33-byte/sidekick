@@ -63,6 +63,17 @@ export default async function handler(req, res) {
   const profileId = item.profileId
   if (!profileId) return send(res, 400, { ok: false, id, error: 'this held post has no profile — cannot publish safely' })
 
+  // HARD GATE: never publish a caption the engine failed to write. AGENTS.md
+  // tells the assistant not to, but that is an instruction to a model, not an
+  // enforced rule — and AUTO mode has no assistant at all. A human who really
+  // wants the boilerplate can pass force:true.
+  if (item.captionDegraded && body?.force !== true) {
+    return send(res, 409, {
+      ok: false, id, blocked: 'captionDegraded',
+      error: 'this caption is generic demo text (the AI writer failed), not this agent\'s style. Refusing to publish. Re-send the listing once the caption engine is back, or pass force:true to publish it anyway.',
+    })
+  }
+
   // Take an ATOMIC claim before publishing. Read-then-delete is two operations, so
   // two ✅ arriving together both saw the item and both published — measured. The
   // claim is a single test-and-set, so exactly one caller ever gets through.

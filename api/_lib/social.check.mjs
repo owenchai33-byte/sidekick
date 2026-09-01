@@ -1,4 +1,4 @@
-// Run: node api/_lib/social.test.mjs  — verifies BOTH backends shape their
+// Run: node api/_lib/social.check.mjs  — verifies BOTH backends shape their
 // requests correctly (auth header, profile scoping, video media, TikTok caption
 // handling) with fetch stubbed, so a provider swap can be checked without keys.
 // Verify both backends shape their requests correctly, with fetch stubbed.

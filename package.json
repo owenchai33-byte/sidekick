@@ -3,11 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "SideKick — property listing automation for Kuching property agents (PICK → OPTIMISE → APPROVE → PUBLISH).",
+  "description": "SideKick \u2014 property listing automation for Kuching property agents (PICK \u2192 OPTIMISE \u2192 APPROVE \u2192 PUBLISH).",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npx vitest run && node api/_lib/social.check.mjs",
+    "check": "npm run test && npm run build"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",

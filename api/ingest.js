@@ -232,6 +232,15 @@ export default async function handler(req, res) {
 
   // AUTO mode — publish now, skipping approval.
   if (body?.auto === true) {
+    // AUTO has no human in the loop, so the degraded check MUST happen here.
+    // Without it a Gemini outage publishes demo boilerplate straight to a
+    // client's page with nobody ever seeing it.
+    if (captionDegraded) {
+      return send(res, 503, {
+        ok: false, posted: false, blocked: 'captionDegraded', listing, caption,
+        error: 'the AI caption engine failed — refusing to auto-publish generic demo text. Retry once the engine is back.',
+      })
+    }
     const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
@@ -250,6 +259,10 @@ export default async function handler(req, res) {
       sender: meta.sender,
       profileId: postProfile,
       platforms,
+      // Persisted so approve.js can refuse server-side. The agent is TOLD not to
+      // publish a degraded caption (AGENTS.md), but instructions are not a
+      // guarantee — approve must be able to check for itself.
+      captionDegraded,
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,

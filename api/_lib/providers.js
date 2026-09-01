@@ -7,13 +7,67 @@
 
 const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-5'
+const GROQ_DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+
+// A single 429 used to drop us straight to demo boilerplate. Gemini's free tier
+// refuses in bursts and recovers within seconds, so one immediate retry converts
+// most of those failures into a real caption. Measured 2026-09-01: the parser and
+// the caption writer, called seconds apart, disagreed constantly.
+//
+// Everything here runs inside a Vercel function with no maxDuration set (~10s on
+// Hobby), so retries are bounded by a WALL-CLOCK BUDGET, not just an attempt
+// count. Blowing the budget would turn a slow caption into a dead request, which
+// is worse than a degraded one.
+const TRANSIENT = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+const retryBudgetMs = () => Number(process.env.AI_RETRY_BUDGET_MS || 6000)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Providers to try, in order: the configured one, then any listed in
+// AI_FALLBACK_PROVIDER (comma-separated). Only providers whose key is actually
+// present are attempted, so an unset fallback silently costs nothing.
+function providerChain() {
+  const primary = (process.env.AI_PROVIDER || 'gemini').toLowerCase()
+  const extra = (process.env.AI_FALLBACK_PROVIDER || '')
+    .toLowerCase().split(',').map((x) => x.trim()).filter(Boolean)
+  const keyed = { gemini: 'GEMINI_API_KEY', claude: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY' }
+  const seen = new Set()
+  return [primary, ...extra].filter((p) => {
+    if (seen.has(p) || !keyed[p] || !process.env[keyed[p]]) return false
+    seen.add(p)
+    return true
+  })
+}
+
+function adapterFor(p) {
+  if (p === 'claude') return runClaude
+  if (p === 'groq') return runGroq
+  return runGemini
+}
+
+// Retry one provider while its errors look transient and the budget allows.
+async function withRetry(fn, deadline) {
+  let attempt = 0, lastErr
+  for (;;) {
+    try { return await fn() } catch (e) {
+      lastErr = e
+      const waited = Math.min(500 * 2 ** attempt, 2500) + Math.floor(Math.random() * 200)
+      attempt += 1
+      // Give up if the error is permanent (bad key, bad request) or if sleeping
+      // then retrying would run past the deadline.
+      if (!e?.transient || Date.now() + waited >= deadline) throw lastErr
+      await sleep(waited)
+    }
+  }
+}
 
 export function providerStatus() {
   const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase()
   const hasGemini = !!process.env.GEMINI_API_KEY
   const hasClaude = !!process.env.ANTHROPIC_API_KEY
-  const active = provider === 'claude' ? hasClaude : hasGemini
-  return { provider, hasGemini, hasClaude, configured: active }
+  const hasGroq = !!process.env.GROQ_API_KEY
+  // Configured means SOMETHING in the chain can run, not just the primary.
+  const chain = providerChain()
+  return { provider, hasGemini, hasClaude, hasGroq, chain, configured: chain.length > 0 }
 }
 
 /**
@@ -21,9 +75,18 @@ export function providerStatus() {
  * Throws on transport/API errors so the caller can fall back to demo mode.
  */
 export async function runModel(prompt) {
-  const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase()
-  if (provider === 'claude') return runClaude(prompt)
-  return runGemini(prompt)
+  const chain = providerChain()
+  if (!chain.length) throw new Error('no AI provider configured (set GEMINI_API_KEY)')
+  const deadline = Date.now() + retryBudgetMs()
+  let lastErr
+  for (const p of chain) {
+    try { return await withRetry(() => adapterFor(p)(prompt), deadline) } catch (e) {
+      lastErr = e
+      // Move to the next provider only if there is time left to try it.
+      if (Date.now() >= deadline) break
+    }
+  }
+  throw lastErr || new Error('all AI providers failed')
 }
 
 async function runGemini(prompt) {
@@ -42,7 +105,10 @@ async function runGemini(prompt) {
   })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Gemini ${res.status}: ${detail.slice(0, 300)}`)
+    const err = new Error(`Gemini ${res.status}: ${detail.slice(0, 300)}`)
+    err.status = res.status
+    err.transient = TRANSIENT.has(res.status)
+    throw err
   }
   const data = await res.json()
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
@@ -71,11 +137,45 @@ async function runClaude(prompt) {
   })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Anthropic ${res.status}: ${detail.slice(0, 300)}`)
+    const err = new Error(`Anthropic ${res.status}: ${detail.slice(0, 300)}`)
+    err.status = res.status
+    err.transient = TRANSIENT.has(res.status)
+    throw err
   }
   const data = await res.json()
   const text = (data?.content || []).map((b) => b.text || '').join('')
   if (!text) throw new Error('Anthropic returned no text')
+  return text
+}
+
+// Groq's free tier, OpenAI-compatible. Exists so the caption engine survives a
+// Gemini outage without a paid second vendor: set GROQ_API_KEY and
+// AI_FALLBACK_PROVIDER=groq. Never used unless the key is present.
+async function runGroq(prompt) {
+  const key = process.env.GROQ_API_KEY
+  if (!key) throw new Error('GROQ_API_KEY not set')
+  const model = process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    const err = new Error(`Groq ${res.status}: ${detail.slice(0, 300)}`)
+    err.status = res.status
+    err.transient = TRANSIENT.has(res.status)
+    throw err
+  }
+  const data = await res.json()
+  const text = data?.choices?.[0]?.message?.content || ''
+  if (!text) throw new Error('Groq returned no text')
   return text
 }
 
