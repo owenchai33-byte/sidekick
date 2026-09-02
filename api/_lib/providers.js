@@ -167,6 +167,12 @@ async function runGroq(prompt) {
     body: JSON.stringify({
       model,
       temperature: 0.8,
+      // gpt-oss models burn REASONING tokens against the same rate limit as
+      // output: one caption call measured 4,146 tokens, 1,685 of them reasoning,
+      // against an 8,000/min free-tier budget - barely one listing a minute.
+      // reasoning_effort low cut it to 2,945 total (445 reasoning) with the
+      // format intact. A caption does not need chain-of-thought.
+      ...(model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}),
       response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: prompt }],
     }),
