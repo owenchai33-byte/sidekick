@@ -86,3 +86,30 @@ export function looksLikeDemoCaption(caption) {
   const c = String(caption || '')
   return DEMO_MARKERS.filter((re) => re.test(c)).length >= 2
 }
+
+
+// Fabricated price history.
+//
+// Measured 2026-09-02 across 16 generations: given "RM338,000, RM100k below
+// value", the model wrote "RM438,000 / NOW ONLY RM338,000 / PRICE REDUCED" in
+// EIGHT of eight sale captions. "Below value" is a comparison to a valuation;
+// it is not a previous asking price, and advertising a reduction that never
+// happened is a misleading claim about someone else's property.
+//
+// A prompt rule did not stop it — this is the enforcement. Anything that claims
+// a reduction the listing never mentioned is treated as a degraded caption, and
+// the existing publish gate then refuses it.
+const REDUCTION_CLAIM = /\b(now only|was rm|reduced from|price\s*(reduced|reduction|drop|dropped|slashed|cut))\b/i
+
+/**
+ * True when the caption claims a price cut the source listing never made.
+ * Only fires when the listing itself says nothing about a reduction, so a
+ * genuinely reduced listing still advertises normally.
+ */
+export function inventsPriceHistory(caption, listing) {
+  const cap = String(caption || '')
+  if (!REDUCTION_CLAIM.test(cap)) return false
+  // The agent's own words are the authority. If THEY said it was reduced, fine.
+  const source = `${listing?.rawText || ''} ${listing?.title || ''}`
+  return !REDUCTION_CLAIM.test(source)
+}

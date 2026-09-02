@@ -53,9 +53,16 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     ? `\n\nTHE AGENT'S OWN STYLE — HIGHEST PRIORITY. Follow these exactly; they override any default tone/length/emoji/hashtag guidance below where they conflict:\n${styleRules || '(no written rules — match the examples)'}${styleExamples.length ? `\n\nMatch the voice, length and formatting of these example captions the agent wrote:\n${styleExamples.map((e, i) => `— Example ${i + 1} —\n${e}`).join('\n')}` : ''}`
     : ''
 
+  // Spell the price out as ONE asking price with an explicit prohibition, rather
+  // than leaving the model to reason from "RM100k below value". Left to itself it
+  // derived a bank value and then advertised it as a former asking price.
+  const priceLine = listing.price != null
+    ? `Asking price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''} — this is the ONLY price. There is no earlier or higher asking price. Do not state one, do not imply a reduction.`
+    : null
+
   const facts = [
     `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,
-    listing.price != null && `Price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''}`,
+    priceLine,
     listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
     listing.propertyType && `Property type: ${listing.propertyType}`,
     listing.bedrooms != null && `Bedrooms: ${listing.bedrooms}`,
@@ -104,11 +111,28 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
   }
   const conventions = languages.map((l) => CONVENTIONS[l.id]).filter(Boolean).join('\n')
 
+  // The agent's format goes FIRST, not buried after the facts. Measured
+  // 2026-09-02: with the style mid-prompt, both Gemini and Groq returned a
+  // flowing paragraph and ignored the CAPS headline, the 📍 line, the ━ dividers
+  // and the double-spacing. Moving the same style to the top — with an explicit
+  // "reproduce the STRUCTURE" instruction — produced the agent's layout almost
+  // exactly. The model was never the problem; the ordering was.
+  const styleFirst = styleActive
+    ? `${styleBlock}
+
+REPRODUCE THAT FORMAT. The layout, emoji placement, CAPS, dividers and blank-line
+spacing must match the examples in STRUCTURE — not just in tone. This overrides
+every craft note below where they conflict; if the style is a rigid template,
+follow the template.
+
+`
+    : ''
+
   return `You are the property copywriter every agent in Kuching, Sarawak wishes they could hire. You write native, natural, high-converting marketing copy — never robotic, never machine-translated, never templated.
 
-LISTING FACTS:
+${styleFirst}LISTING FACTS:
 ${facts}${rawBlock}
-${styleBlock}
+${styleActive ? '' : styleBlock}
 Write copy for EACH platform, in its own voice:
 ${platformBriefs}
 
@@ -121,6 +145,14 @@ CRAFT STANDARD — write like a real top agent, not a template:
 - Be specific and concrete. Use the real numbers and help the reader picture living there.
 - Vary sentence length. One strong opening line beats three flat ones.
 - BAN these clichés / AI tells: "nestled", "boasts", "dream home awaits", "won't last long", "a rare gem", "priced to sell", "look no further", "unparalleled", "boasts a".
+- NEVER INVENT PRICE HISTORY. "below value" / "below bank value" is a COMPARISON,
+  not a previous asking price. Do NOT write "was RM438,000, NOW ONLY RM338,000",
+  do not add an earlier price, and do not write "PRICE REDUCED" or "PRICE DROP"
+  unless the listing itself states an earlier asking price or an actual reduction.
+  Measured 2026-09-02: given "RM338,000, RM100k below value" the model produced
+  "RM438,000 / NOW ONLY RM338,000 / PRICE REDUCED" — inventing a reduction that
+  never happened. In a property advert that is a misleading claim, not a flourish.
+  State a bank value as a bank value (🏦) and a saving as a saving (💥).
 - NO INVENTED CLAIMS. This is the most important rule and it is broken most often.
   Everything you write must be traceable to a fact above. In particular NEVER assert:
   * who it suits ("ideal for a young professional", "perfect for a small family",

@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption } from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory } from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -116,5 +116,31 @@ describe('claimPostOnce', () => {
     delete process.env.BLOB_READ_WRITE_TOKEN
     const { claimPostOnce } = await import('./postguard.js')
     expect(await claimPostOnce('anything')).toBe(true)
+  })
+})
+
+describe('invented price history', () => {
+  const listing = { rawText: 'RARE 1-BEDROOM FOR SALE. Tropics City. RM338,000 (RM100k below value).' }
+
+  it('catches the exact fabrication seen in 8 of 8 generations', () => {
+    expect(inventsPriceHistory('💰 Selling Price\nRM438,000\nNOW ONLY RM338,000', listing)).toBe(true)
+  })
+
+  it('catches "PRICE REDUCED" when the listing never said so', () => {
+    expect(inventsPriceHistory('🔥 PRICE REDUCED | FOR SALE', listing)).toBe(true)
+  })
+
+  it('allows an honest below-bank-value caption', () => {
+    expect(inventsPriceHistory('💰 RM338,000\n🏦 Bank Value RM438,000\n💥 Save RM100,000', listing)).toBe(false)
+  })
+
+  it('does NOT block a listing the agent really did reduce', () => {
+    const reduced = { rawText: 'PRICE REDUCED! Was RM400,000, now RM338,000.' }
+    expect(inventsPriceHistory('🔥 PRICE REDUCED\nNOW ONLY RM338,000', reduced)).toBe(false)
+  })
+
+  it('is safe on empty input', () => {
+    expect(inventsPriceHistory('', listing)).toBe(false)
+    expect(inventsPriceHistory('Lovely 2 bed in Kuching, RM2,500/month.', listing)).toBe(false)
   })
 })

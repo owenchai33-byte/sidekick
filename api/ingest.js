@@ -14,6 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
+import { inventsPriceHistory } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
@@ -73,7 +74,14 @@ async function writeCaption(listing, languages, status, styleGuide, contact) {
     catch { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   }
   const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
-  return { caption: parts.join('\n\n• • •\n\n'), degraded }
+  const caption = parts.join('\n\n• • •\n\n')
+  // A caption that invents a price cut is WORSE than a missing one: it is a
+  // misleading claim about a client's property, published under their name.
+  // Treat it exactly like a failed generation so the publish gate refuses it.
+  if (!degraded && inventsPriceHistory(caption, listing)) {
+    return { caption, degraded: true, reason: 'invented a price reduction the listing never mentioned' }
+  }
+  return { caption, degraded }
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
