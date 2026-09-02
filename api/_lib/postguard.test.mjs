@@ -182,3 +182,19 @@ Lister: Edward 0183929100` }
     expect(v.invented.some((x) => /airport/i.test(x))).toBe(true)
   })
 })
+
+describe('per-agent rule isolation', () => {
+  it('one agent\'s rules can never reach another agent (separate profile keys)', async () => {
+    // rules/<profileId>.json — the key IS the isolation. This test exists
+    // because 100 agents share one system and a leak would put one agent's
+    // preferences (or worse, their listings) into another's captions.
+    process.env.BLOB_READ_WRITE_TOKEN = 'test-token'
+    const { saveRule, getRules } = await import('./style.js')
+    // saveRule refuses without a profile — there is no shared/global bucket to
+    // fall back to, so a rule cannot be written anywhere but one agent's key.
+    await expect(saveRule('', { rule: 'x' })).rejects.toThrow(/profile required/)
+    // and a read for an unknown profile returns empty, never someone else's
+    delete process.env.BLOB_READ_WRITE_TOKEN
+    expect(await getRules('nobody')).toEqual({ rules: [] })
+  })
+})

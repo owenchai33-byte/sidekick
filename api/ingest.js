@@ -21,7 +21,7 @@ import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
 import { putPending } from './_lib/pending.js'
-import { getStyle } from './_lib/style.js'
+import { getStyle, getRules } from './_lib/style.js'
 import { getBrand } from './_lib/brand.js'
 import { connectedAccounts, postToConnected, defaultProfile } from './_lib/social.js'
 import { put } from '@vercel/blob'
@@ -65,12 +65,12 @@ async function parseText(text, status) {
 // demo boilerplate, not the agent's real copy. It used to fall back silently, so a
 // Gemini 429 meant every agent posted generic demo text with nothing to indicate it.
 // A missing caption is obvious; a plausible wrong one is not.
-async function writeCaption(listing, languages, status, styleGuide, contact) {
+async function writeCaption(listing, languages, status, styleGuide, contact, rules) {
   const langs = languages.length ? languages : ['en']
   let content, degraded = false
   if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   else {
-    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact))) }
+    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules))) }
     catch { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   }
   let parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
@@ -91,7 +91,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact) {
     // that quietly drops one of the agent's selling points.
     for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length); attempt++) {
       try {
-        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact)}
+        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules)}
 
 YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
 same JSON shape:
@@ -253,6 +253,10 @@ export default async function handler(req, res) {
   }
 
   const styleGuide = await getStyle(postProfile)
+
+  // Per-agent rules travel with the style: same profile, same isolation.
+
+  const agentRules = (await getRules(postProfile)).rules
   // Report whether a trained style was actually found. A missing style does not
   // error — it silently produces generic copy, which is exactly how an orphaned
   // style went unnoticed after a provider switch. Surface it so the agent can say so.
@@ -260,7 +264,7 @@ export default async function handler(req, res) {
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
-  const { caption, degraded: captionDegraded } = await writeCaption(listing, languages, status, styleGuide, contact)
+  const { caption, degraded: captionDegraded } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {

@@ -10,7 +10,7 @@
 //   GET  /api/style?profile=<id>&kind=brand   → { color, name }
 //   POST /api/style { profile, style, examples }        → saves the style
 //   POST /api/style { profile, kind:"brand", color, name } → saves the brand
-import { getStyle, saveStyle } from './_lib/style.js'
+import { getStyle, saveStyle, getRules, saveRule } from './_lib/style.js'
 import { getBrand, saveBrand } from './_lib/brand.js'
 
 function send(res, status, payload) {
@@ -34,6 +34,7 @@ export default async function handler(req, res) {
     const profile = url.searchParams.get('profile') || ''
     if (!profile) return send(res, 400, { error: 'profile required' })
     if ((url.searchParams.get('kind') || '') === 'brand') return send(res, 200, await getBrand(profile))
+    if ((url.searchParams.get('kind') || '') === 'rules') return send(res, 200, await getRules(profile))
     return send(res, 200, await getStyle(profile))
   }
 
@@ -45,6 +46,8 @@ export default async function handler(req, res) {
     try {
       if (body?.kind === 'brand') {
         return send(res, 200, await saveBrand(profile, { color: body?.color, name: body?.name }))
+      if ((body?.kind || '') === 'rules')
+        return send(res, 200, await saveRule(profile, { rule: body?.rule, replace: body?.rules }))
       }
       return send(res, 200, await saveStyle(profile, { style: body?.style, examples: body?.examples }))
     } catch (e) {

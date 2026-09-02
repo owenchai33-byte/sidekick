@@ -51,3 +51,69 @@ export async function saveStyle(profileId, { style, examples }) {
   } catch { /* ignore prune failures */ }
   return data
 }
+
+
+// --- per-agent RULES ---------------------------------------------------------
+//
+// Everything an agent has taught this system beyond their caption format: which
+// photo to use as cover, colours, what never to say, how they want the reel
+// voiced, anything they corrected once and should never have to correct again.
+//
+// This exists because there was nowhere to put it. An agent could say "always
+// use the first photo I send" or "stop calling it an apartment" and it was gone
+// the moment the chat moved on - so they had to say it again, and again. At 100
+// agents, each with their own way of working, that is the difference between a
+// system that learns and one that annoys.
+//
+// Kept as short plain-English lines, newest last, capped so the caption prompt
+// cannot bloat. Rules are per profileId, so one agent's preferences can never
+// reach another's captions.
+const RULES_PREFIX = 'rules/'
+const MAX_RULES = 40
+
+async function ruleVersions(profileId, t) {
+  const { blobs } = await list({ prefix: `${RULES_PREFIX}${profileId}`, token: t, limit: 25 })
+  return blobs.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+}
+
+export async function getRules(profileId) {
+  const t = tok()
+  if (!t || !profileId) return { rules: [] }
+  try {
+    const v = await ruleVersions(profileId, t)
+    if (!v.length) return { rules: [] }
+    const r = await fetch(v[0].url, { cache: 'no-store' })
+    if (!r.ok) return { rules: [] }
+    const j = await r.json()
+    return { rules: Array.isArray(j.rules) ? j.rules : [] }
+  } catch { return { rules: [] } }
+}
+
+/** Add one rule (deduped), or replace the whole set when `replace` is given. */
+export async function saveRule(profileId, { rule, replace }) {
+  const t = tok()
+  if (!t) throw new Error('no BLOB token')
+  if (!profileId) throw new Error('profile required')
+  let rules
+  if (Array.isArray(replace)) {
+    rules = replace.map((r) => String(r || '').trim()).filter(Boolean)
+  } else {
+    const cur = (await getRules(profileId)).rules
+    const clean = String(rule || '').trim().slice(0, 300)
+    if (!clean) return { rules: cur }
+    // Near-duplicate check: the same correction phrased twice should not stack up.
+    const norm = (x) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+    rules = cur.filter((r) => norm(r) !== norm(clean))
+    rules.push(clean)
+  }
+  rules = rules.slice(-MAX_RULES)
+  const data = { rules, updatedAt: new Date().toISOString() }
+  const blob = await put(`${RULES_PREFIX}${profileId}.json`, JSON.stringify(data), {
+    access: 'public', token: t, contentType: 'application/json', addRandomSuffix: true,
+  })
+  try {
+    const stale = (await ruleVersions(profileId, t)).filter((b) => b.url !== blob.url)
+    if (stale.length) await del(stale.map((b) => b.url), { token: t })
+  } catch { /* ignore prune failures */ }
+  return data
+}

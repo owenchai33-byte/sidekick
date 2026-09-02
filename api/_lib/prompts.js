@@ -41,7 +41,7 @@ ${rawText}
 }
 
 /** CONTENT: listing + chosen platforms/languages → native copy per combination. */
-export function buildContentPrompt(listing, platformIds, languageIds, styleGuide, contact) {
+export function buildContentPrompt(listing, platformIds, languageIds, styleGuide, contact, rules) {
   const platforms = platformIds.map((id) => PLATFORM_MAP[id]).filter(Boolean)
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
 
@@ -154,6 +154,17 @@ YOUR JOB, EXACTLY:
   // and the double-spacing. Moving the same style to the top — with an explicit
   // "reproduce the STRUCTURE" instruction — produced the agent's layout almost
   // exactly. The model was never the problem; the ordering was.
+  // Corrections this agent has already made. They are here, above the listing,
+  // because an agent should never have to give the same correction twice - that
+  // is the whole promise of a trainable assistant.
+  const ruleList = (Array.isArray(rules) ? rules : []).filter(Boolean)
+  const rulesBlock = ruleList.length
+    ? `THIS AGENT'S OWN RULES — they told you these; follow every one:
+${ruleList.map((r) => `- ${r}`).join('\n')}
+
+`
+    : ''
+
   const styleFirst = styleActive
     ? `${styleBlock}
 
@@ -169,7 +180,7 @@ follow the template.
   // agent's own listing and present it better - an editor's job, not a writer's.
   return `You are an expert property EDITOR for agents in Kuching, Sarawak. Agents send you their own listing; you republish it in their house format, sharper and better organised. You never add facts they did not give you, and you never drop the selling points they did.
 
-${styleFirst}LISTING FACTS:
+${rulesBlock}${styleFirst}LISTING FACTS:
 ${facts}${rawBlock}
 ${styleActive ? '' : styleBlock}
 Write copy for EACH platform, in its own voice:
