@@ -2,6 +2,8 @@
 // and generating per-platform × per-language copy. Both instruct the model to
 // return raw JSON only. Files prefixed `_` are not treated as routes by Vercel.
 
+import { propertyNames } from './postguard.js'
+
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
 
 /** PARSE: raw WhatsApp/listing blob → structured fields the agent can correct. */
@@ -60,8 +62,20 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     ? `Asking price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''} — this is the ONLY price. There is no earlier or higher asking price. Do not state one, do not imply a reduction.`
     : null
 
+  // The property's NAME as a labelled fact, not something to spot in prose.
+  // Measured: Edward's listing puts "Tropics City" on line 2, right under a
+  // headline line that says nearly the same thing - the model read line 2 as a
+  // duplicate and dropped it, losing the name in 2 of 6 captions. Extracted with
+  // the SAME function the validator uses, so the prompt and the gate can never
+  // disagree about what the name is.
+  const names = propertyNames(listing.rawText || '', listing)
+  const nameLine = names.length
+    ? `PROPERTY NAME: ${names[0]} — this is what the property is CALLED. It MUST appear in the caption, near the top. Do not treat it as a repeat of the headline.`
+    : null
+
   const facts = [
     `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,
+    nameLine,
     priceLine,
     listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
     listing.propertyType && `Property type: ${listing.propertyType}`,

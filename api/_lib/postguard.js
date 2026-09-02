@@ -140,13 +140,17 @@ const MATERIAL_CLAIMS = [
 ]
 
 /** Multi-word proper names from the listing's opening lines ("Tropics City"). */
-function propertyNames(rawText) {
+export function propertyNames(rawText, listing) {
   const head = String(rawText || '').split('\n').slice(0, 5).join(' ')
   const out = []
   for (const m of head.matchAll(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)+|[A-Z]{3,}(?: [A-Z]{3,})+)\b/g)) {
     const name = m[1].trim()
     // generic listing vocabulary is not a name - "Bedroom Unit For Sale" etc.
     if (/\b(For|Sale|Rent|Unit|Bedroom|Bathroom|Rare|Price|Value|Details|Location|Investment|Property|Selling|Below|Bank|Current|Rental|Annual|Gross|Yield|Contact|Lister|Prime)\b/i.test(name)) continue
+    // The AREA is already its own field - "Tabuan Dayak" is where it is, not
+    // what it is called. Treating it as a property name made the validator
+    // demand it twice and muddied the real name.
+    if (listing?.location && name.toLowerCase() === String(listing.location).toLowerCase()) continue
     out.push(name)
   }
   return [...new Set(out)]
@@ -177,7 +181,7 @@ export function captionViolations(caption, listing) {
   if (/below (?:bank )?value|below market/i.test(src) && !/below (?:bank )?value|below market|save[sd]? rm/i.test(cap)) {
     missing.push('the below-value hook')
   }
-  for (const name of propertyNames(src)) {
+  for (const name of propertyNames(src, listing)) {
     if (!capLow.includes(name.toLowerCase())) missing.push(`property name "${name}"`)
   }
 
