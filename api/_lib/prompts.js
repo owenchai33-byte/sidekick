@@ -276,7 +276,16 @@ ${facts}
   is not a view. If the listing says "negotiable" or gives a floor, USE those — real
   specifics are what make it sound like an agent instead of an advert.
 
-"caption" = the TikTok post caption: 1 short line + 4-6 relevant hashtags (e.g. #KuchingProperty #Sarawak). Emojis ok here.`
+"caption" = the TikTok post caption. A published reel came back reading only
+"Ready to invest in Kuching? #KuchingProperty #Sarawak" — a viewer learned
+nothing, and TikTok captions are searchable, so an empty one is a wasted
+listing. Write 3-5 SHORT lines carrying the real details, then 4-6 hashtags:
+- line 1: the property NAME and what it is (for sale / for rent)
+- then: the price, the size and beds/baths, and the single strongest number the
+  listing gives (below-value saving, rental income or yield) — one per line
+- last line: how to reach the agent
+- then the hashtags
+Use ONLY facts from the listing above; invent nothing. Emojis are fine here.`
 }
 
 /** PLAN: a month of non-listing content posts (tips, area spotlights, festive,
