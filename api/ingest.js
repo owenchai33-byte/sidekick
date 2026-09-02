@@ -84,7 +84,12 @@ async function writeCaption(listing, languages, status, styleGuide, contact) {
   // publish gate refuses it.
   if (!degraded) {
     let v = captionViolations(caption, listing)
-    if (v.missing.length || v.invented.length) {
+    // Two repair rounds, not one. Measured on Edward's real listing: one round
+    // recovered the property name, the below-value hook and the phone number
+    // (2/6 -> 6/6), but a single figure - the annual rental - still slipped
+    // half the time. The second pass is cheap next to publishing an advert
+    // that quietly drops one of the agent's selling points.
+    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length); attempt++) {
       try {
         const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact)}
 
@@ -99,8 +104,21 @@ ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.
           const rv = captionViolations(rcap, listing)
           if (rv.missing.length + rv.invented.length < v.missing.length + v.invented.length) { caption = rcap; v = rv }
         }
-      } catch { /* repair is best-effort; the verdict below still stands */ }
-      if (v.invented.length || v.missing.length > 1) {
+      } catch { break /* repair is best-effort; the verdict below still stands */ }
+    }
+    {
+      // A missing MONEY figure is material - an advert that omits the annual
+      // rental or the saving misrepresents the deal by omission. Anything
+      // invented is refused outright. A single non-money omission is allowed
+      // through rather than blocking the agent's post over a phrasing nit.
+      // Blocking omissions: money figures, the below-value hook, and the
+      // property's NAME. Owen's complaint about the published Tropics City post
+      // was precisely that it never named the property. Chasing each leak with
+      // more prompt text just moves it (annual rental 3/6 -> 6/6, name 6/6 ->
+      // 4/6), so these are refused rather than coaxed: a caption the model will
+      // not complete after two repair rounds does not get published.
+      const blocking = v.missing.filter((m) => /^RM|hook|property name/i.test(m))
+      if (v.invented.length || blocking.length || v.missing.length > 1) {
         return { caption, degraded: true,
           reason: `caption breaks the listing contract - ${[...v.invented.map((x)=>`invented "${x}"`), ...v.missing.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
       }

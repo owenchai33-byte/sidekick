@@ -83,10 +83,47 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
       : `- "${p.id}" (${p.name}): ${p.brief || p.style}`)
     .join('\n')
 
-  // Pass the original message so rich numbers (price history, ROI, floor
-  // breakdown, rental income) survive — the parser only keeps a few fields.
+  // The agent's own listing is the SOURCE, not reference material.
+  //
+  // This prompt used to cast the model as a copywriter AUTHORING an advert from
+  // extracted fields (price, beds, baths), with the original text offered as
+  // optional background it "MAY use". That framing is the root of every
+  // invention chased for months: parse a rich listing down to six numbers, ask
+  // a model to reconstruct an advert from them, and it fills the gaps — which
+  // is where "Fully Furnished" appeared on a unit that never claimed it, while
+  // the agent's own hook (RM100K below value) and the property name were lost.
+  //
+  // Editing is a far narrower task than authoring. The job below is: take their
+  // words, reshape into their house format, keep every fact, add nothing.
   const rawBlock = (listing.rawText || '').trim()
-    ? `\n\nAGENT'S ORIGINAL MESSAGE — you MAY use any concrete property facts/numbers written here (price history, bank value, savings %, floor-by-floor sizes, facing, ROI %, rental income, deposit/terms). Use only what is actually written; never invent. IGNORE any person's name or phone in it (e.g. the original lister's contact) — the sign-off comes from the agent's style, not this message:\n"""\n${listing.rawText.trim()}\n"""`
+    ? `
+
+THE AGENT'S OWN LISTING — THIS IS YOUR SOURCE TEXT. You are REWRITING it, not writing a new advert:
+"""
+${listing.rawText.trim()}
+"""
+
+YOUR JOB, EXACTLY:
+1. KEEP EVERY FACT above — every price, size, rental figure, yield, distance,
+   nearby amenity, selling point, and the property's NAME. If it is in their
+   listing it belongs in the caption. Dropping their selling points is as much
+   a failure as inventing new ones.
+2. ADD NO FACT that is not above. No furnishing, condition, tenure, view,
+   travel time, nearby place or "ideal for" that they did not write. If you are
+   unsure whether something is in the source, it is not — leave it out.
+3. RESHAPE it into the agent's format: their layout, emoji, dividers, spacing,
+   ordering and sign-off. THIS is where you make it better — a sharper
+   headline, better ordering, cleaner structure, their strongest number given
+   the most weight. Better presentation of THEIR facts, never more facts.
+4. ALWAYS keep the phone number from the source, exactly as written. Measured:
+   with a softer rule the number survived only 2 rewrites in 6 — an advert with
+   no phone number is a broken advert. If the style has its own sign-off line,
+   keep BOTH: the sign-off, then the number.
+5. Checklist before you answer — every one of these that appears in the source
+   MUST appear in your caption: the property NAME · every RM figure (asking
+   price, monthly rental, ANNUAL rental, savings/below-value) · size · yield or
+   ROI · every named nearby place, amenity and travel time · the phone number.
+   Re-read the source and confirm each one is present before returning.`
     : ''
 
   const lengthRule = styleActive
@@ -128,7 +165,9 @@ follow the template.
 `
     : ''
 
-  return `You are the property copywriter every agent in Kuching, Sarawak wishes they could hire. You write native, natural, high-converting marketing copy — never robotic, never machine-translated, never templated.
+  // "You write marketing copy" invited authoring. The job is to take a Kuching
+  // agent's own listing and present it better - an editor's job, not a writer's.
+  return `You are an expert property EDITOR for agents in Kuching, Sarawak. Agents send you their own listing; you republish it in their house format, sharper and better organised. You never add facts they did not give you, and you never drop the selling points they did.
 
 ${styleFirst}LISTING FACTS:
 ${facts}${rawBlock}
