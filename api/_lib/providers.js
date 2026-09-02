@@ -7,7 +7,12 @@
 
 const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-5'
-const GROQ_DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+// gpt-oss-20b, not llama-3.3-70b-versatile: the llama model carries an
+// Enterprise designation and is absent from Groq's free-tier table, so a free
+// key would fail with model-not-found. gpt-oss-20b is on the free tier, is the
+// fastest production model they list (~1000 T/s) and has a 131K context, which
+// is ample for a caption prompt. Override with GROQ_MODEL.
+const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
 
 // A single 429 used to drop us straight to demo boilerplate. Gemini's free tier
 // refuses in bursts and recovers within seconds, so one immediate retry converts
