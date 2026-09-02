@@ -98,10 +98,19 @@ export default async function handler(req, res) {
       const { images } = body
       if (!Array.isArray(images) || images.length < 2) return send(res, 400, { error: 'need 2+ images' })
       if (!status.configured) return send(res, 200, { demo: true, index: 0 }) // demo: keep first
-      const out = await runModelVision(buildCoverPrompt(images.length), images)
-      const parsed = extractJson(out)
-      const idx = Math.max(0, Math.min(images.length - 1, Number(parsed?.index) || 0))
-      return send(res, 200, { demo: false, provider: status.provider, index: idx })
+      // Vision is Gemini-only. When the caption engine runs on another provider
+      // (Groq), or Gemini is unavailable, choosing a cover is the one thing that
+      // cannot run — so fall back to the FIRST photo instead of failing the whole
+      // request. The sender's first photo is the cover by convention anyway, so
+      // this degrades to their own choice rather than to nothing.
+      try {
+        const out = await runModelVision(buildCoverPrompt(images.length), images)
+        const parsed = extractJson(out)
+        const idx = Math.max(0, Math.min(images.length - 1, Number(parsed?.index) || 0))
+        return send(res, 200, { demo: false, provider: status.provider, index: idx })
+      } catch (e) {
+        return send(res, 200, { demo: false, degraded: true, index: 0, error: String(e?.message || e).slice(0, 120) })
+      }
     }
 
     return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan", "refine" or "cover".' })
