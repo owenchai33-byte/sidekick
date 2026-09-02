@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory } from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations } from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -142,5 +142,43 @@ describe('invented price history', () => {
   it('is safe on empty input', () => {
     expect(inventsPriceHistory('', listing)).toBe(false)
     expect(inventsPriceHistory('Lovely 2 bed in Kuching, RM2,500/month.', listing)).toBe(false)
+  })
+})
+
+describe('caption contract (the Tropics City incident)', () => {
+  const listing = { rawText: `RARE 1-BEDROOM UNIT FOR SALE. SAVED RM100k
+Tropics City - 1 Bedroom Unit For Sale
+Location : Tabuan Dayak
+Selling Price : RM338,000 (RM100K Below Value)
+800 sqft, 1 Bedroom, 1 Bathroom, 1 Carpark
+Current Rental : RM1,300/month. Annual Rental: RM15,600
+5 mins to Jalan Song. Gross ROI 4.62% p.a.
+Lister: Edward 0183929100` }
+
+  it('flags the published caption: invented furnishing + dropped hook and name', () => {
+    const v = captionViolations('RM338,000. 800 sq ft. Fully Furnished. RM1,300/month. RM15,600 annual. Edward 0183929100', listing)
+    expect(v.invented).toContain('Fully Furnished')
+    expect(v.missing).toContain('the below-value hook')
+    expect(v.missing.some((m) => m.includes('Tropics City'))).toBe(true)
+  })
+
+  it('passes a caption that honours the listing', () => {
+    const good = `Tropics City, Tabuan Dayak. RM338,000 - RM100K Below Value (save RM100k).
+800 sqft, 1 bed 1 bath 1 carpark. Rental RM1,300/month, RM15,600/year, ROI 4.62%.
+5 mins to Jalan Song. Edward 0183929100`
+    const v = captionViolations(good, listing)
+    expect(v.invented).toEqual([])
+    expect(v.missing).toEqual([])
+  })
+
+  it('allows furnishing when the listing states it', () => {
+    const furnished = { rawText: 'RENNA RESIDENCE for rent, RM2,500/month, fully furnished, Lydia 0143998011' }
+    const v = captionViolations('RENNA RESIDENCE - RM2,500/month, Fully Furnished. Lydia 0143998011', furnished)
+    expect(v.invented).toEqual([])
+  })
+
+  it('flags an invented distance claim', () => {
+    const v = captionViolations('Tropics City RM338,000, 800 sqft, RM1,300/month, RM15,600, RM100k below value, 5 mins to Jalan Song, 3 mins to the airport! Edward 0183929100', listing)
+    expect(v.invented.some((x) => /airport/i.test(x))).toBe(true)
   })
 })

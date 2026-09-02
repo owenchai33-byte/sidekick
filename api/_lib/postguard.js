@@ -113,3 +113,83 @@ export function inventsPriceHistory(caption, listing) {
   const source = `${listing?.rawText || ''} ${listing?.title || ''}`
   return !REDUCTION_CLAIM.test(source)
 }
+
+
+// The caption contract, enforced.
+//
+// 2026-09-02, live on the client's page: "Fully Furnished" and "Move-in Ready"
+// on a unit whose listing never mentioned furnishing - while the listing's OWN
+// selling points (RM100K below value, the property name, every location perk)
+// were dropped. The owner's instruction was explicit: include what the listing
+// says, invent nothing. Prompt rules and spot-checks caught the LAST failure
+// each time; this checks the contract itself, on every caption, in code.
+//
+// MISSING: the facts a buyer decides on. Every RM amount, the size, the
+// contact, the below-value hook, the property name - if the listing says it,
+// the caption must carry it.
+// INVENTED: material claims about the property (furnishing, condition, views,
+// tenure, being newly renovated) that the listing never made.
+const MATERIAL_CLAIMS = [
+  [/fully[ -]furnished|semi[ -]furnished|partially[ -]furnished|unfurnished/i, /furnish/i],
+  [/move[- ]?in ready/i, /move[- ]?in ready|vacant|ready/i],
+  [/newly renovated|renovated/i, /renovat/i],
+  [/freehold/i, /freehold/i],
+  [/leasehold/i, /leasehold/i],
+  [/(stunning|sea|city|river|mountain|panoramic) view/i, /view/i],
+  [/corner (lot|unit)/i, /corner/i],
+]
+
+/** Multi-word proper names from the listing's opening lines ("Tropics City"). */
+function propertyNames(rawText) {
+  const head = String(rawText || '').split('\n').slice(0, 5).join(' ')
+  const out = []
+  for (const m of head.matchAll(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)+|[A-Z]{3,}(?: [A-Z]{3,})+)\b/g)) {
+    const name = m[1].trim()
+    // generic listing vocabulary is not a name - "Bedroom Unit For Sale" etc.
+    if (/\b(For|Sale|Rent|Unit|Bedroom|Bathroom|Rare|Price|Value|Details|Location|Investment|Property|Selling|Below|Bank|Current|Rental|Annual|Gross|Yield|Contact|Lister|Prime)\b/i.test(name)) continue
+    out.push(name)
+  }
+  return [...new Set(out)]
+}
+
+/**
+ * Returns { missing: [...], invented: [...] } - both empty means the caption
+ * honours the listing. `listing` is the parsed listing incl. rawText.
+ */
+export function captionViolations(caption, listing) {
+  const cap = String(caption || '')
+  const capLow = cap.toLowerCase()
+  const src = `${listing?.rawText || ''}`
+  const srcLow = src.toLowerCase()
+  const missing = [], invented = []
+
+  // -- MISSING ---------------------------------------------------------------
+  // every distinct money amount the listing states (RM338,000 / RM1,300 / RM15,600 / RM100K)
+  for (const m of new Set([...src.matchAll(/rm\s?([\d,]+(?:\.\d+)?\s*k?)/gi)].map((x) => x[1].replace(/\s/g, '').toLowerCase()))) {
+    const canon = m.endsWith('k') ? String(parseFloat(m) * 1000) : m.replace(/,/g, '')
+    const inCap = capLow.includes(m) || cap.replace(/,/g, '').includes(canon)
+    if (!inCap) missing.push(`RM${m.toUpperCase()}`)
+  }
+  const sq = src.match(/([\d,]+)\s*(?:sq\s?ft|sqft|square feet)/i)
+  if (sq && !cap.replace(/,/g, '').includes(sq[1].replace(/,/g, ''))) missing.push(`${sq[1]} sqft`)
+  const phone = src.match(/\b(01\d[- ]?\d{7,8})\b/)
+  if (phone && !cap.replace(/[- ]/g, '').includes(phone[1].replace(/[- ]/g, ''))) missing.push(`contact ${phone[1]}`)
+  if (/below (?:bank )?value|below market/i.test(src) && !/below (?:bank )?value|below market|save[sd]? rm/i.test(cap)) {
+    missing.push('the below-value hook')
+  }
+  for (const name of propertyNames(src)) {
+    if (!capLow.includes(name.toLowerCase())) missing.push(`property name "${name}"`)
+  }
+
+  // -- INVENTED --------------------------------------------------------------
+  const known = `${srcLow} ${String(listing?.furnishing || '').toLowerCase()} ${String(listing?.tenure || '').toLowerCase()}`
+  for (const [claim, grounds] of MATERIAL_CLAIMS) {
+    if (claim.test(cap) && !grounds.test(known)) invented.push(cap.match(claim)[0])
+  }
+  // distances/amenities the listing never mentioned ("5 mins to X", "near Y")
+  for (const m of cap.matchAll(/\b(\d+\s*min(?:ute)?s?\s+(?:to|from)\s+[^\n,.]{3,30})/gi)) {
+    const place = m[1].toLowerCase().replace(/\s+/g, ' ')
+    if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
+  }
+  return { missing, invented }
+}

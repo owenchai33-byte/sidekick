@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { inventsPriceHistory } from './_lib/postguard.js'
+import { inventsPriceHistory, captionViolations } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
@@ -73,8 +73,39 @@ async function writeCaption(listing, languages, status, styleGuide, contact) {
     try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact))) }
     catch { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   }
-  const parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
-  const caption = parts.join('\n\n• • •\n\n')
+  let parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
+  let caption = parts.join('\n\n• • •\n\n')
+
+  // THE CAPTION CONTRACT. On 2026-09-02 "Fully Furnished" was published about a
+  // unit whose listing never mentioned furnishing, while the listing's own hook
+  // (RM100K below value) and the property name were dropped. Validate every
+  // caption against the listing; give the model ONE shot to repair its own
+  // violations; a caption that still breaks the contract is degraded and the
+  // publish gate refuses it.
+  if (!degraded) {
+    let v = captionViolations(caption, listing)
+    if (v.missing.length || v.invented.length) {
+      try {
+        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact)}
+
+YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
+same JSON shape:
+${v.missing.length ? `- MISSING (the listing states these; include every one): ${v.missing.join('; ')}` : ''}
+${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}`)
+        const repaired = extractJson(fix)
+        const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
+        if (rparts.length) {
+          const rcap = rparts.join('\n\n• • •\n\n')
+          const rv = captionViolations(rcap, listing)
+          if (rv.missing.length + rv.invented.length < v.missing.length + v.invented.length) { caption = rcap; v = rv }
+        }
+      } catch { /* repair is best-effort; the verdict below still stands */ }
+      if (v.invented.length || v.missing.length > 1) {
+        return { caption, degraded: true,
+          reason: `caption breaks the listing contract - ${[...v.invented.map((x)=>`invented "${x}"`), ...v.missing.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
+      }
+    }
+  }
   // A caption that invents a price cut is WORSE than a missing one: it is a
   // misleading claim about a client's property, published under their name.
   // Treat it exactly like a failed generation so the publish gate refuses it.
