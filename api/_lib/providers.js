@@ -15,7 +15,18 @@ const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-5'
 // key would fail with model-not-found. gpt-oss-20b is on the free tier, is the
 // fastest production model they list (~1000 T/s) and has a 131K context, which
 // is ample for a caption prompt. Override with GROQ_MODEL.
-const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
+// gpt-oss-120b, not 20b. Two reasons, both found on 2026-09-03:
+//
+// 1. Every caption-quality measurement this project has - 9/9 facts kept across
+//    three agent styles and three listing shapes, zero invented claims - was
+//    taken on 120b. Production was quietly running the smaller 20b, so the
+//    numbers being relied on were never the numbers being shipped.
+// 2. The free tier meters tokens per day PER MODEL (200,000), and it is only
+//    the 429 body that says so - the response headers advertise the 8,000/min
+//    limit and nothing else, so a day's budget disappears with no warning. A
+//    day of load testing exhausted 20b's allowance and every caption fell back
+//    to demo text for hours, while 120b answered normally the whole time.
+const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-120b'
 
 // A single 429 used to drop us straight to demo boilerplate. Gemini's free tier
 // refuses in bursts and recovers within seconds, so one immediate retry converts
