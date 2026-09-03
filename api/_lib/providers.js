@@ -241,10 +241,19 @@ async function runClaude(prompt) {
 // Groq's free tier, OpenAI-compatible. Exists so the caption engine survives a
 // Gemini outage without a paid second vendor: set GROQ_API_KEY and
 // AI_FALLBACK_PROVIDER=groq. Never used unless the key is present.
-async function runGroq(prompt) {
+// The free tier meters tokens per day PER MODEL, so a second model is a second
+// 200,000-token budget - roughly doubling the day's capacity for nothing. The
+// backup is smaller and writes a slightly plainer caption, which is why it is
+// only ever reached once the main model's day is genuinely spent: every caption
+// still has to pass the same contract before it can be published, so the
+// trade is a plainer caption instead of no caption at all, and an agent at 9am
+// gets a post rather than a refusal.
+const GROQ_BACKUP_MODEL = process.env.GROQ_BACKUP_MODEL || 'openai/gpt-oss-20b'
+
+async function runGroq(prompt, modelOverride) {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('GROQ_API_KEY not set')
-  const model = process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL
+  const model = modelOverride || process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -270,6 +279,13 @@ async function runGroq(prompt) {
     // A rate limit is not a failure, it is a queue. Groq says exactly how long
     // to wait; honour it instead of burning the budget on blind backoff.
     if (res.status === 429) err.retryAfterMs = parseRetryAfter(res.headers, detail)
+    // Out of tokens for the DAY on this model, and a backup model with its own
+    // budget exists? Use it. Waiting is pointless - the budget returns at
+    // midnight - and the alternative is falling through to a paid provider, or
+    // to nothing, while a perfectly good free allowance sits unused.
+    if (res.status === 429 && /per day|\b(TPD|RPD)\b/i.test(detail) && !modelOverride && model !== GROQ_BACKUP_MODEL) {
+      return runGroq(prompt, GROQ_BACKUP_MODEL)
+    }
     throw err
   }
   const data = await res.json()

@@ -121,8 +121,10 @@ describe('a daily budget hands over, a per-minute limit waits', () => {
     const { runModel } = await load()
     const started = Date.now()
     expect(await runModel('x')).toContain('338,000')
-    // One Groq attempt, then Gemini. Not seven attempts over the whole budget.
-    expect(tried.filter((t) => t === 'groq')).toHaveLength(1)
+    // Two Groq calls - the main model, then the backup model, which has its own
+    // daily budget - and then out to Gemini. NOT seven blind retries against a
+    // budget that only returns at midnight.
+    expect(tried.filter((t) => t === 'groq')).toHaveLength(2)
     expect(Date.now() - started).toBeLessThan(1500)
   })
 
@@ -134,5 +136,63 @@ describe('a daily budget hands over, a per-minute limit waits', () => {
     const { runModel } = await load()
     await runModel('x')
     expect(tried.filter((t) => t === 'groq').length).toBeGreaterThan(1)
+  })
+})
+
+// A second model is a second daily budget.
+//
+// The free tier meters tokens per day PER MODEL. When the main model's 200,000
+// are gone, waiting achieves nothing (they return at midnight) and falling
+// through to a paid provider spends money while a perfectly good free allowance
+// sits unused. Verified live on a day the main model was genuinely spent: the
+// backup answered in 1.2s with a contract-clean caption.
+describe('a spent daily budget moves to the other free model', () => {
+  const load = async () => { vi.resetModules(); return import('./providers.js') }
+  const TPD = 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 198997'
+
+  it('retries on the backup model rather than giving up on Groq', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '3000' })
+    const models = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      const model = JSON.parse(opts.body).model
+      models.push(model)
+      if (model === 'openai/gpt-oss-120b') return new Response(JSON.stringify({ error: { message: TPD } }), { status: 429 })
+      return new Response(JSON.stringify({ choices: [{ message: { content: GOOD } }] }), { status: 200 })
+    }))
+    const { runModel } = await load()
+    expect(await runModel('x')).toContain('338,000')
+    expect(models).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
+  })
+
+  it('does not loop when the backup is spent too — it hands to the next provider', async () => {
+    Object.assign(process.env, {
+      AI_PROVIDER: 'groq', AI_FALLBACK_PROVIDER: 'gemini',
+      GROQ_API_KEY: 'gsk_test', GEMINI_API_KEY: 'AIza_test', AI_RETRY_BUDGET_MS: '3000',
+    })
+    const seen = []
+    vi.stubGlobal('fetch', vi.fn(async (url, opts) => {
+      if (/groq/.test(String(url))) {
+        seen.push(JSON.parse(opts.body).model)
+        return new Response(JSON.stringify({ error: { message: TPD } }), { status: 429 })
+      }
+      seen.push('gemini')
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: GOOD }] } }] }), { status: 200 })
+    }))
+    const { runModel } = await load()
+    expect(await runModel('x')).toContain('338,000')
+    // Each Groq model tried exactly once, then out to Gemini. No recursion.
+    expect(seen).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'gemini'])
+  })
+
+  it('a per-MINUTE limit does not switch model — it waits, keeping the better one', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '2000' })
+    const models = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      models.push(JSON.parse(opts.body).model)
+      return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 0.3s' } }), { status: 429 })
+    }))
+    const { runModel } = await load()
+    await expect(runModel('x')).rejects.toThrow()
+    expect([...new Set(models)]).toEqual(['openai/gpt-oss-120b'])
   })
 })
