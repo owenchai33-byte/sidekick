@@ -24,8 +24,38 @@ const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
 // count. Blowing the budget would turn a slow caption into a dead request, which
 // is worse than a degraded one.
 const TRANSIENT = new Set([408, 409, 425, 429, 500, 502, 503, 504])
-const retryBudgetMs = () => Number(process.env.AI_RETRY_BUDGET_MS || 6000)
+// 6s could not outlast a per-MINUTE rate limit, so a morning burst degraded
+// captions that would have succeeded seconds later. 75s covers Groq's window
+// with room to spare. Callers are background jobs holding a WhatsApp "building
+// your post..." message, not a user staring at a spinner.
+const retryBudgetMs = () => Number(process.env.AI_RETRY_BUDGET_MS || 75000)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// "1m26.4s" / "577ms" / "12.3" -> milliseconds. Groq reports the reset window
+// on every response; on a 429 it is the difference between waiting the right
+// two seconds and giving up on a caption that would have succeeded.
+function durationToMs(v) {
+  if (!v) return 0
+  const t = String(v).trim()
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(parseFloat(t) * 1000)   // bare seconds
+  let ms = 0
+  for (const [, n, u] of t.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)/g)) {
+    const f = u === 'ms' ? 1 : u === 's' ? 1000 : u === 'm' ? 60000 : 3600000
+    ms += parseFloat(n) * f
+  }
+  return Math.round(ms)
+}
+
+function parseRetryAfter(headers, body) {
+  const h = (k) => { try { return headers?.get?.(k) } catch { return null } }
+  const direct = durationToMs(h('retry-after'))
+  if (direct) return direct
+  // token limits reset far sooner than request limits; take the smaller usable one
+  const cands = [durationToMs(h('x-ratelimit-reset-tokens')), durationToMs(h('x-ratelimit-reset-requests'))].filter((x) => x > 0)
+  if (cands.length) return Math.min(...cands)
+  const m = String(body || '').match(/try again in ([\d.]+\s*\w+)/i)
+  return m ? durationToMs(m[1]) : 0
+}
 
 // Providers to try, in order: the configured one, then any listed in
 // AI_FALLBACK_PROVIDER (comma-separated). Only providers whose key is actually
@@ -55,7 +85,10 @@ async function withRetry(fn, deadline) {
   for (;;) {
     try { return await fn() } catch (e) {
       lastErr = e
-      const waited = Math.min(500 * 2 ** attempt, 2500) + Math.floor(Math.random() * 200)
+      // A rate limit tells us exactly how long to wait; anything else backs off.
+      const waited = e?.retryAfterMs
+        ? Math.min(e.retryAfterMs + 500, 45000)
+        : Math.min(500 * 2 ** attempt, 2500) + Math.floor(Math.random() * 200)
       attempt += 1
       // Give up if the error is permanent (bad key, bad request) or if sleeping
       // then retrying would run past the deadline.
@@ -182,6 +215,9 @@ async function runGroq(prompt) {
     const err = new Error(`Groq ${res.status}: ${detail.slice(0, 300)}`)
     err.status = res.status
     err.transient = TRANSIENT.has(res.status)
+    // A rate limit is not a failure, it is a queue. Groq says exactly how long
+    // to wait; honour it instead of burning the budget on blind backoff.
+    if (res.status === 429) err.retryAfterMs = parseRetryAfter(res.headers, detail)
     throw err
   }
   const data = await res.json()

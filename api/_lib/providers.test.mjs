@@ -61,3 +61,39 @@ describe('runModel resilience', () => {
     expect(providerStatus().configured).toBe(false)
   })
 })
+
+describe('rate limits are a queue, not a failure', () => {
+  it('waits the time the provider asks for, then succeeds', async () => {
+    process.env.GEMINI_API_KEY = ''
+    process.env.GROQ_API_KEY = 'g'
+    process.env.AI_PROVIDER = 'groq'
+    process.env.AI_RETRY_BUDGET_MS = '75000'
+    let n = 0
+    const t0 = Date.now()
+    globalThis.fetch = vi.fn(async () => {
+      n++
+      if (n === 1) {
+        return { ok: false, status: 429,
+          headers: new Headers({ 'x-ratelimit-reset-tokens': '0.4s' }),
+          text: async () => '{"error":{"message":"Rate limit reached"}}' }
+      }
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"ok":1}' } }] }) }
+    })
+    expect(await runModel('x')).toBe('{"ok":1}')
+    expect(n).toBe(2)                       // it retried rather than degrading
+    expect(Date.now() - t0).toBeGreaterThan(300)  // and actually waited
+  })
+
+  it('gives up inside the budget instead of hanging a request forever', async () => {
+    process.env.GROQ_API_KEY = 'g'
+    process.env.AI_PROVIDER = 'groq'
+    process.env.AI_RETRY_BUDGET_MS = '1500'
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false, status: 429,
+      headers: new Headers({ 'x-ratelimit-reset-tokens': '60s' }),
+      text: async () => '{"error":{"message":"Rate limit reached"}}' }))
+    const t0 = Date.now()
+    await expect(runModel('x')).rejects.toThrow(/429/)
+    expect(Date.now() - t0).toBeLessThan(4000)   // never waits the full 60s
+  })
+})
