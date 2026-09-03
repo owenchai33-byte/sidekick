@@ -243,7 +243,19 @@ ${platforms.map((p) => `  "${p.id}": { ${languages.map((l) => `"${l.id}": "..."`
 }
 
 /** REEL: a punchy TikTok voiceover script + short caption for a listing. */
-export function buildReelPrompt(listing) {
+export function buildReelPrompt(listing, styleGuide, rules) {
+  // A reel is the agent's advert too. It used to receive neither their trained
+  // style nor the rules they had taught the system, so an agent could correct
+  // the caption a dozen times and the reel would keep making the same mistake -
+  // exactly the "don't make the same mistake twice" complaint, on the surface
+  // the client sees most.
+  const ruleList = (Array.isArray(rules) ? rules : []).filter(Boolean)
+  const rulesBlock = ruleList.length
+    ? `\nTHIS AGENT'S OWN RULES — they told you these, follow every one:\n${ruleList.map((r) => `- ${r}`).join('\n')}\n`
+    : ''
+  const voiceBlock = (styleGuide?.style || '').trim()
+    ? `\nTHE AGENT'S VOICE — match this tone (the reel is spoken, so adapt the format, keep the voice):\n${String(styleGuide.style).slice(0, 1200)}\n`
+    : ''
   const facts = [
     `Type: ${listing.listingType === 'rental' ? 'For rent (monthly)' : 'For sale'}`,
     listing.price != null && `Price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''}`,
@@ -256,6 +268,7 @@ export function buildReelPrompt(listing) {
   ].filter(Boolean).join('\n')
 
   return `Write a TikTok reel for this Kuching property. Return ONLY JSON: { "script": "...", "caption": "..." }
+${rulesBlock}${voiceBlock}
 
 LISTING:
 ${facts}
@@ -271,6 +284,10 @@ ${facts}
   practical advantage, who it suits based ONLY on stated facts.
 - End with a fast CTA (e.g. "DM before it's gone").
 - 35-55 words total, ~3-5 short sentences. Spoken style: write numbers as words a voice reads naturally (say "four ninety-eight thousand" not "RM498,000"; "seven ninety-seven square feet"). No emojis, no hashtags, no markdown — it's read aloud.
+- EVERY WORD must be traceable to the facts above. This is spoken aloud under
+  the agent's name, so an invented detail is the agent lying to a buyer. Do not
+  reach for atmosphere: no "hidden gem", "vibrant", "prime", "sought-after",
+  "just dropped", "won't last" — none of those are facts about this property.
 - Only use facts above; never invent. NO invented views, no invented buyer type
   ("perfect for young professionals"), no invented nearby amenities. A floor number
   is not a view. If the listing says "negotiable" or gives a floor, USE those — real

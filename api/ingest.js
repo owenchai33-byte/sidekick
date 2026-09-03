@@ -134,10 +134,10 @@ ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
-async function reelScript(listing, status) {
+async function reelScript(listing, status, styleGuide, rules) {
   if (status.configured) {
     try {
-      const j = extractJson(await runModel(buildReelPrompt(listing)))
+      const j = extractJson(await runModel(buildReelPrompt(listing, styleGuide, rules)))
       if (j && j.script) return { script: String(j.script), caption: String(j.caption || '') }
     } catch { /* fall through */ }
   }
@@ -244,7 +244,25 @@ export default async function handler(req, res) {
   if (body?.mode === 'reel') {
     if (!media.length) return send(res, 200, { ok: false, reason: 'A reel needs photos', listing })
     const { card } = await withBrandCard(media.slice(0, 1), listing, brand, true)
-    const rs = await reelScript(listing, status)
+    // The reel gets the same trained voice and learned rules as the caption.
+    // Without them an agent's correction fixed only half their output - they
+    // would fix the caption a dozen times and the reel kept repeating it.
+    const reelStyle = await getStyle(postProfile)
+    const reelRules = (await getRules(postProfile)).rules
+    let rs = await reelScript(listing, status, reelStyle, reelRules)
+    // The spoken script and the TikTok caption publish under the agent's name
+    // too, so they answer to the same contract as the Facebook caption. A reel
+    // saying "modern finishes" about a listing that never mentioned them is the
+    // same lie, read aloud. One repair attempt naming the offending phrases.
+    {
+      const rv = captionViolations(`${rs.script || ''}\n${rs.caption || ''}`, listing)
+      if (rv.invented.length) {
+        const retry = await reelScript(listing, status, reelStyle,
+          [...(reelRules || []), `NEVER say any of these - the listing does not support them: ${rv.invented.join('; ')}`])
+        const rv2 = captionViolations(`${retry.script || ''}\n${retry.caption || ''}`, listing)
+        if (rv2.invented.length < rv.invented.length) rs = retry
+      }
+    }
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
       card: card || media[0]?.url || null, profileId: postProfile, brandApplied,
