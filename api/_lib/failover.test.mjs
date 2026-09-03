@@ -86,3 +86,53 @@ describe('the caption engine survives its provider', () => {
     expect([...new Set(tried)]).toEqual(['gemini', 'groq'])
   })
 })
+
+// Per-minute and per-day limits need opposite handling.
+//
+// Groq words both as "Rate limit reached" and only the bracketed code separates
+// them. A per-minute limit clears in seconds and is worth waiting out. A daily
+// budget clears at midnight, which no retry budget reaches - so treating it as
+// transient made every request burn the full 75s before handing over to the
+// next provider. On the day Groq's allowance runs out, that is the difference
+// between a quiet handover and the whole product crawling.
+describe('a daily budget hands over, a per-minute limit waits', () => {
+  const load = async () => { vi.resetModules(); return import('./providers.js') }
+  const KEYED = { GROQ_API_KEY: 'gsk_test', GEMINI_API_KEY: 'AIza_test' }
+
+  const groqSaying = (message, geminiOk = true) => {
+    const tried = []
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const u = String(url)
+      if (/groq/.test(u)) {
+        tried.push('groq')
+        return new Response(JSON.stringify({ error: { message } }), { status: 429 })
+      }
+      tried.push('gemini')
+      return new Response(JSON.stringify(geminiOk
+        ? { candidates: [{ content: { parts: [{ text: GOOD }] } }] }
+        : { error: { message: 'nope' } }), { status: geminiOk ? 200 : 500 })
+    }))
+    return tried
+  }
+
+  it('hands a spent DAILY budget straight to the fallback', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', AI_FALLBACK_PROVIDER: 'gemini', ...KEYED, AI_RETRY_BUDGET_MS: '5000' })
+    const tried = groqSaying('Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 198534. Please try again in 10m34.6s')
+    const { runModel } = await load()
+    const started = Date.now()
+    expect(await runModel('x')).toContain('338,000')
+    // One Groq attempt, then Gemini. Not seven attempts over the whole budget.
+    expect(tried.filter((t) => t === 'groq')).toHaveLength(1)
+    expect(Date.now() - started).toBeLessThan(1500)
+  })
+
+  it('still waits out a PER-MINUTE limit before giving up on the primary', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', AI_FALLBACK_PROVIDER: 'gemini', ...KEYED, AI_RETRY_BUDGET_MS: '2500' })
+    // "try again in 0.4s" fits inside the budget below; a 12s wait would
+    // correctly be abandoned on the first attempt, which would prove nothing.
+    const tried = groqSaying('Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Used 7900. Please try again in 0.4s')
+    const { runModel } = await load()
+    await runModel('x')
+    expect(tried.filter((t) => t === 'groq').length).toBeGreaterThan(1)
+  })
+})

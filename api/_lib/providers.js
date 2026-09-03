@@ -46,7 +46,14 @@ const TRANSIENT = new Set([408, 409, 425, 429, 500, 502, 503, 504])
 // giving up, on a Vercel function that is killed at about ten - so the caller
 // never even received the degraded answer. Treated as permanent, the same call
 // fails over in well under a second.
-const SPENT = /prepayment credits are depleted|quota|billing|exceeded your current quota|insufficient|payment/i
+// A PER-MINUTE limit is worth waiting out - it clears in seconds. A per-DAY
+// limit is not: it clears at midnight, which no retry budget reaches. Groq
+// words both as "Rate limit reached", and only the bracketed code tells them
+// apart (TPM/RPM vs TPD/RPD). Left as transient, a spent daily budget made
+// every single request burn the full 75s retry budget before falling through
+// to the next provider - so the day Groq's allowance runs out, the whole
+// product would crawl instead of quietly handing over.
+const SPENT = /prepayment credits are depleted|quota|billing|exceeded your current quota|insufficient|payment|per day|\b(TPD|RPD)\b/i
 function isTransient(status, body) {
   if (!TRANSIENT.has(status)) return false
   if (status === 429 && SPENT.test(String(body || ''))) return false
