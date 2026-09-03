@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations } from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames } from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -196,5 +196,41 @@ describe('per-agent rule isolation', () => {
     // and a read for an unknown profile returns empty, never someone else's
     delete process.env.BLOB_READ_WRITE_TOKEN
     expect(await getRules('nobody')).toEqual({ rules: [] })
+  })
+})
+
+describe('property name extraction (the two multi-style failures)', () => {
+  const name = (raw, location) => propertyNames(raw, { location })[0]
+
+  it('does not mistake marketing filler for the name', () => {
+    // "Brand New RENNA RESIDENCE" yielded "Brand New" first, so the prompt told
+    // the model the property was called "Brand New" and the real name vanished.
+    expect(name('Brand New RENNA RESIDENCE for Rent. The Northbank Kuching.', 'The Northbank')).toBe('RENNA RESIDENCE')
+  })
+
+  it('trims listing vocabulary instead of discarding the name with it', () => {
+    expect(name('Tropics City For Sale. RM338,000.', 'Tabuan Dayak')).toBe('Tropics City')
+    expect(name('Tropics City – 1 Bedroom Unit For Sale', 'Tabuan Dayak')).toBe('Tropics City')
+  })
+
+  it('never returns the area as the property name', () => {
+    expect(name('Tabuan Dayak condo for sale', 'Tabuan Dayak')).toBeUndefined()
+  })
+})
+
+describe('the below-value hook is a concept, not an English phrase', () => {
+  const listing = { rawText: 'Tropics City. RM338,000 (RM100K Below Value). Edward 0183929100' }
+  const missesHook = (cap) => captionViolations(cap, listing).missing.includes('the below-value hook')
+
+  it('accepts the hook in Chinese', () => {
+    expect(missesHook('Tropics City 售价 RM338,000，低于市价 RM100,000。Edward 0183929100')).toBe(false)
+  })
+
+  it('accepts the hook in Malay', () => {
+    expect(missesHook('Tropics City RM338,000, bawah nilai pasaran RM100,000. Edward 0183929100')).toBe(false)
+  })
+
+  it('still catches a caption that genuinely drops it', () => {
+    expect(missesHook('Tropics City RM338,000. Edward 0183929100')).toBe(true)
   })
 })

@@ -144,16 +144,41 @@ export function propertyNames(rawText, listing) {
   const head = String(rawText || '').split('\n').slice(0, 5).join(' ')
   const out = []
   for (const m of head.matchAll(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)+|[A-Z]{3,}(?: [A-Z]{3,})+)\b/g)) {
-    const name = m[1].trim()
-    // generic listing vocabulary is not a name - "Bedroom Unit For Sale" etc.
-    if (/\b(For|Sale|Rent|Unit|Bedroom|Bathroom|Rare|Price|Value|Details|Location|Investment|Property|Selling|Below|Bank|Current|Rental|Annual|Gross|Yield|Contact|Lister|Prime)\b/i.test(name)) continue
+    let name = m[1].trim()
+    // Generic listing vocabulary is not part of a name, but it usually arrives
+    // ATTACHED to one: "Tropics City For Sale" is the property "Tropics City".
+    // Discarding the whole phrase lost the name entirely; trim the generic words
+    // off the edges and keep the core.
+    const GENERIC = /^(for|sale|rent|unit|bedroom|bedrooms|bathroom|bathrooms|rare|price|value|details|location|investment|property|selling|below|bank|current|rental|annual|gross|yield|contact|lister|prime|kuching|sarawak)$/i
+    let parts = name.split(/\s+/)
+    while (parts.length && GENERIC.test(parts[0])) parts.shift()
+    while (parts.length && GENERIC.test(parts[parts.length - 1])) parts.pop()
+    if (parts.length < 2) continue          // a single bare word is too weak to be a name
+    name = parts.join(' ')
     // The AREA is already its own field - "Tabuan Dayak" is where it is, not
     // what it is called. Treating it as a property name made the validator
     // demand it twice and muddied the real name.
     if (listing?.location && name.toLowerCase() === String(listing.location).toLowerCase()) continue
     out.push(name)
   }
-  return [...new Set(out)]
+  // RANK the candidates. "Brand New RENNA RESIDENCE for Rent" yields both
+  // "Brand New" and "RENNA RESIDENCE", and taking the first meant telling the
+  // model the property was called "Brand New" — which is exactly how the name
+  // went missing from a caption. Marketing filler is never a name, and an
+  // ALL-CAPS phrase almost always is.
+  const FILLER = /^(brand|new|rare|beautiful|spacious|modern|luxury|prime|freehold|leasehold|the|this|fully|semi|partially|super|mega|hot|best|good|nice)$/i
+  const scored = [...new Set(out)]
+    .filter((n) => !n.split(/\s+/).every((w) => FILLER.test(w)))
+    .map((n) => {
+      let score = 0
+      if (/^[A-Z0-9 ]+$/.test(n)) score += 3                       // ALL CAPS reads as a name
+      if (/\b(residence|residency|city|park|heights|court|villa|tower|suites|garden|point|square|place|hill|view|homes?)\b/i.test(n)) score += 3
+      // filler words dragged along by the regex ("Brand New RENNA") weaken it
+      score -= n.split(/\s+/).filter((w) => FILLER.test(w)).length
+      return { n, score }
+    })
+    .sort((a, b) => b.score - a.score)
+  return scored.map((x) => x.n)
 }
 
 /**
@@ -178,9 +203,13 @@ export function captionViolations(caption, listing) {
   if (sq && !cap.replace(/,/g, '').includes(sq[1].replace(/,/g, ''))) missing.push(`${sq[1]} sqft`)
   const phone = src.match(/\b(01\d[- ]?\d{7,8})\b/)
   if (phone && !cap.replace(/[- ]/g, '').includes(phone[1].replace(/[- ]/g, ''))) missing.push(`contact ${phone[1]}`)
-  if (/below (?:bank )?value|below market/i.test(src) && !/below (?:bank )?value|below market|save[sd]? rm/i.test(cap)) {
-    missing.push('the below-value hook')
-  }
+  // The hook is a CONCEPT, and agents publish in English, Chinese and Malay.
+  // An English-only test scored a Chinese caption that plainly said 低于市价 as
+  // having dropped the hook, and the repair loop then chased a phrase that was
+  // already there.
+  const HOOK_SRC = /below (?:bank )?value|below market|低于|市价|bawah nilai|harga pasaran/i
+  const HOOK_CAP = /below (?:bank )?value|below market|save[sd]? rm|低于|市价|省下|优惠|bawah nilai|harga pasaran|jimat/i
+  if (HOOK_SRC.test(src) && !HOOK_CAP.test(cap)) missing.push('the below-value hook')
   for (const name of propertyNames(src, listing)) {
     if (!capLow.includes(name.toLowerCase())) missing.push(`property name "${name}"`)
   }
