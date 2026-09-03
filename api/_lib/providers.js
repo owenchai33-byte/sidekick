@@ -45,6 +45,23 @@ function isTransient(status, body) {
 // captions that would have succeeded seconds later. 75s covers Groq's window
 // with room to spare. Callers are background jobs holding a WhatsApp "building
 // your post..." message, not a user staring at a spinner.
+// MEASURED CEILING, 2026-09-03 - read this before promising anyone volume.
+//
+// Groq's free tier allows 8,000 tokens PER MINUTE (and 1,000 requests/day).
+// One styled caption prompt is ~2,790 tokens before the reply, and a single
+// listing makes several calls (parse, write, up to two contract repairs, then
+// the reel script) - roughly 13,000 tokens. So ONE listing already exceeds the
+// per-minute budget on its own.
+//
+// In practice: listings arriving one after another are fine, because the budget
+// refills between them. THREE ARRIVING AT ONCE IS NOT - tested against the
+// deployed app, three concurrent listings each spent 75-150s retrying and then
+// fell back to demo text, which the publish gate correctly refused. The agents
+// got nothing. Ten concurrent behaved the same way.
+//
+// No retry budget fixes this; the limit is per-minute and the work does not fit.
+// Serving 30+ agents whose mornings overlap needs a paid tier with a materially
+// higher token-per-minute allowance, not a code change.
 const retryBudgetMs = () => Number(process.env.AI_RETRY_BUDGET_MS || 75000)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
