@@ -234,3 +234,49 @@ describe('the below-value hook is a concept, not an English phrase', () => {
     expect(missesHook('Tropics City RM338,000. Edward 0183929100')).toBe(true)
   })
 })
+
+// The name extractor is only as good as the listing SHAPES it has seen.
+//
+// It was measured 9/9 on multi-line fixtures and shipped. The client's RENNA
+// listing arrives as ONE line, which hands the regex several capitalised runs:
+// it returned both "RENNA RESIDENCE" and "Sqft Fully Furnished", and because
+// captionViolations requires every returned name to appear in the caption, that
+// listing degraded on every single attempt - three probes for three, with no
+// error to explain it. A property has one name.
+describe('property name extraction across real listing shapes', () => {
+  const cases = [
+    ['a one-line listing', 'Brand New RENNA RESIDENCE for Rent. The Northbank Kuching. 2 Bed 2 Bath 787 Sqft Fully Furnished 12th Floor RM2.5k nego.', 'RENNA RESIDENCE'],
+    ['the same listing over several lines', 'Brand New RENNA RESIDENCE for Rent. The Northbank Kuching.\n2 Bed 2 Bath 787 Sqft Fully Furnished 12th Floor\nRental price: RM2,500 (nego)', 'RENNA RESIDENCE'],
+    ['a title-case name', 'Tropics City – 1 Bedroom Unit For Sale. SAVED RM100k\nLocation : Tabuan Dayak\nSelling Price : RM338,000', 'Tropics City'],
+    ['a land listing', 'Batu Kawa Commercial Land For Sale\nLand area: 21,780 sq ft (0.5 acre)\nPrice: RM1,250,000', 'Batu Kawa'],
+    ['an ALL-CAPS name', 'RIVERINE DIAMOND KUCHING For Sale\nRM520,000\n3 bedrooms', 'RIVERINE DIAMOND'],
+  ]
+
+  for (const [label, raw, expected] of cases) {
+    it(`picks the name out of ${label}`, () => {
+      const names = propertyNames(raw, { location: 'The Northbank' })
+      expect(names[0]).toBe(expected)
+    })
+
+    it(`asks for nothing but the name in ${label}`, () => {
+      // Every extra candidate becomes a phrase the caption is REQUIRED to carry.
+      const names = propertyNames(raw, { location: 'The Northbank' })
+      expect(names).toHaveLength(1)
+    })
+  }
+
+  it('does not demand measurements or furnishing as a property name', () => {
+    const raw = 'Brand New RENNA RESIDENCE for Rent. The Northbank Kuching. 2 Bed 2 Bath 787 Sqft Fully Furnished 12th Floor RM2.5k nego.'
+    const names = propertyNames(raw, { location: 'The Northbank' })
+    expect(names.join(' ')).not.toMatch(/sqft|furnished|floor|bed|bath/i)
+  })
+
+  it('clears a caption that carries the real name', () => {
+    const listing = {
+      listingType: 'rental', price: 2500, location: 'The Northbank', sqft: 787, furnishing: 'fully furnished',
+      rawText: 'Brand New RENNA RESIDENCE for Rent. The Northbank Kuching. 2 Bed 2 Bath 787 Sqft Fully Furnished 12th Floor. Rental RM2,500 nego. Lydia 0143998011',
+    }
+    const caption = 'RENNA RESIDENCE — The Northbank Kuching\nRM2,500/month (nego)\n2 Bed 2 Bath | 787 Sqft | 12th Floor | Fully Furnished\nLydia 0143998011'
+    expect(captionViolations(caption, listing)).toEqual({ missing: [], invented: [] })
+  })
+})

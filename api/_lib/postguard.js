@@ -149,7 +149,7 @@ export function propertyNames(rawText, listing) {
     // ATTACHED to one: "Tropics City For Sale" is the property "Tropics City".
     // Discarding the whole phrase lost the name entirely; trim the generic words
     // off the edges and keep the core.
-    const GENERIC = /^(for|sale|rent|unit|bedroom|bedrooms|bathroom|bathrooms|rare|price|value|details|location|investment|property|selling|below|bank|current|rental|annual|gross|yield|contact|lister|prime|kuching|sarawak)$/i
+    const GENERIC = /^(for|sale|rent|unit|bedroom|bedrooms|bathroom|bathrooms|rare|price|value|details|location|investment|property|selling|below|bank|current|rental|annual|gross|yield|contact|lister|prime|kuching|sarawak|sqft|sq|ft|bed|beds|bath|baths|floor|storey|story|carpark|month|nego|furnished|furnishing|land|lot|commercial|residential|area|acre|acres|agent|zone|freehold)$/i
     let parts = name.split(/\s+/)
     while (parts.length && GENERIC.test(parts[0])) parts.shift()
     while (parts.length && GENERIC.test(parts[parts.length - 1])) parts.pop()
@@ -178,7 +178,17 @@ export function propertyNames(rawText, listing) {
       return { n, score }
     })
     .sort((a, b) => b.score - a.score)
-  return scored.map((x) => x.n)
+  // Only the BEST candidate is the name. The caller treats every returned name
+  // as REQUIRED in the caption, and a listing written on one line hands this
+  // regex several capitalised runs: "Brand New RENNA RESIDENCE for Rent. ... 787
+  // Sqft Fully Furnished 12th Floor" yields both "RENNA RESIDENCE" and "Sqft
+  // Fully Furnished", and demanding the second one degraded every caption for
+  // that listing, every time. The multi-line fixtures this was measured on never
+  // showed it. A property has one name; return the winner and, only when the
+  // ranking is genuinely tied, the joint winners.
+  if (!scored.length) return []
+  const best = scored[0].score
+  return scored.filter((x) => x.score === best).map((x) => x.n)
 }
 
 /**
