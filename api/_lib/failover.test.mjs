@@ -8,11 +8,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 const GOOD = JSON.stringify({ facebook_page: 'Tropics City RM338,000' })
-const realFetch = globalThis.fetch
 
+// Replace fetch through vi.stubGlobal rather than by assigning to globalThis:
+// vitest then guarantees it is put back, even if a test throws before its
+// afterEach. Assigning directly leaves a live stub behind on a failure path,
+// and the next file to run gets a fetch that answers every URL with a caption.
 const install = (behaviour) => {
   const tried = []
-  globalThis.fetch = vi.fn(async (url) => {
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
     const u = String(url)
     const who = /groq/.test(u) ? 'groq'
       : /generativelanguage|googleapis/.test(u) ? 'gemini'
@@ -27,7 +30,7 @@ const install = (behaviour) => {
       : who === 'claude' ? { content: [{ text: GOOD }] }
       : { choices: [{ message: { content: GOOD } }] }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
-  })
+  }))
   return tried
 }
 
@@ -39,7 +42,7 @@ const load = async () => { vi.resetModules(); return import('./providers.js') }
 
 const ENV = ['AI_PROVIDER', 'AI_FALLBACK_PROVIDER', 'GROQ_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'AI_RETRY_BUDGET_MS']
 beforeEach(() => { for (const k of ENV) delete process.env[k] })
-afterEach(() => { globalThis.fetch = realFetch })
+afterEach(() => { vi.unstubAllGlobals(); vi.resetModules() })
 
 const KEYED = { GROQ_API_KEY: 'gsk_test', GEMINI_API_KEY: 'AIza_test', AI_RETRY_BUDGET_MS: '3000' }
 const ask = async () => (await (await load()).runModel('give me the json'))

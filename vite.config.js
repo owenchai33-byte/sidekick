@@ -50,5 +50,14 @@ export default defineConfig(({ mode }) => {
     base: './',
     plugins: [react(), devApi(env)],
     server: { port: 5173 },
+    // Vitest's 5s default is not enough headroom on a loaded machine. One test
+    // in roughly fifteen full runs failed with "timed out in 5000ms" - always a
+    // trivial synchronous one, never the same failure twice in isolation, and
+    // never reproducible when that file ran alone (0 in 30). Raising the limit
+    // to 20s: 0 failures in 30 runs, while serialising the files or guarding the
+    // network changed nothing. So it is an occasional worker/transform stall,
+    // not a deadlock in the code - and it matters more, not less, on a slower
+    // laptop. A genuine hang still fails, just 15s later.
+    test: { testTimeout: 20000, hookTimeout: 20000 },
   }
 })

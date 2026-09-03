@@ -9,7 +9,7 @@
 // was written. Nine months of unit tests could not have caught it.
 //
 // So these tests call the ENDPOINT, and assert on what comes back out.
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 const store = new Map()
 vi.mock('./style.js', () => ({
@@ -50,7 +50,18 @@ const mkReq = (method, url, body) => ({
 const post = async (body) => { const res = mkRes(); await handler(mkReq('POST', '/api/style', body), res); return res }
 const get = async (qs) => { const res = mkRes(); await handler(mkReq('GET', `/api/style?${qs}`), res); return res }
 
-beforeEach(() => { store.clear(); vi.clearAllMocks() })
+// If ./style.js is ever NOT mocked, the real one runs and talks to Vercel Blob,
+// which shows up as an unexplained 5-second timeout rather than as a failure
+// anyone can read. Make that impossible to mistake: no test here should touch
+// the network at all, so any attempt is an immediate, named failure.
+beforeEach(() => {
+  store.clear()
+  vi.clearAllMocks()
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
+    throw new Error(`style-api test tried to reach the network (${String(url).slice(0, 60)}) — ./style.js is not mocked`)
+  }))
+})
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('POST kind=rules actually reaches saveRule', () => {
   it('returns the saved rule, not the style object', async () => {
