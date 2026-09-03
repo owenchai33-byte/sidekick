@@ -4,10 +4,17 @@
 // provider is a config flip away from being undone — no redeploy, no code change.
 // Everything else in the app imports from here and never sees a provider URL.
 //
-// Why two providers: Zernio bills per CONNECTED ACCOUNT (each agent = 3 accounts,
-// so the bill grows with every agent Edward signs). PostPeer bills per POST with
-// unlimited accounts, which is the right shape for "many agents, few posts each"
-// — roughly 85% cheaper at 30+ agents.
+// Why two providers: Zernio bills per CONNECTED ACCOUNT and charges whether or
+// not anyone posts, so the bill grows with every agent Edward signs. PostPeer
+// charges only for what is published and lets an agent connect as many accounts
+// as they like — the right shape for "many agents, few posts each", roughly 85%
+// cheaper at 30+ agents.
+//
+// PostPeer's unit is the PLATFORM, not the post: one listing to Facebook,
+// Instagram and TikTok spends three. Confirmed against /v1/usage/ on 2026-09-03,
+// where a count of 7 broke down as facebook 3, instagram 3, tiktok 1. This file
+// used to say "per POST with unlimited accounts", which made the monthly figure
+// look three times better than it is.
 //
 // The two APIs are near-identical (`content` / `mediaItems` / `platforms` /
 // `publishNow`), so the differences handled below are small but WILL break things
@@ -54,6 +61,37 @@ const missingKey = () =>
   provider() === 'postpeer'
     ? 'PostPeer not connected — set POSTPEER_API_KEY in Vercel'
     : 'Zernio not connected — set ZERNIO_API_KEY in Vercel'
+
+// Running out of posting credits used to reach the agent as a raw provider
+// error mid-publish. The agent is a property agent, not the account holder —
+// they cannot top anything up, and the failure read as if they had done
+// something wrong. PostPeer bills one credit per platform and publishes the
+// balance, so the answer is knowable BEFORE anything is sent.
+// Deliberately says nothing about the post being kept: it is kept when the
+// approve route refuses (that path holds the pending record), and NOT kept when
+// ingest.js publishes in auto mode, which has no pending record at all. One
+// constant reaches both, so it can only state what is true of both.
+const OUT_OF_CREDITS =
+  'Posting is paused — this account has run out of posting credits, so nothing was sent. ' +
+  'The account owner needs to top up before anything can go out.'
+
+/**
+ * Credits available to spend right now, or null when the balance is UNKNOWN.
+ * Null never means zero — it means the check itself could not answer.
+ */
+export async function postingCredits() {
+  try {
+    const r = await fetch(`${POSTPEER}/usage/`, { headers: authHeaders() })
+    if (!r.ok) return null
+    const d = await r.json()
+    const b = d?.balance || {}
+    const parts = [b.monthly?.remaining, b.purchased?.remaining].filter((n) => Number.isFinite(n))
+    if (!parts.length) return null        // a shape we don't recognise is unknown, not empty
+    return parts.reduce((a, n) => a + n, 0)
+  } catch {
+    return null
+  }
+}
 
 /** Accounts connected to a profile, normalised to { id, platform, username }. */
 export async function connectedAccounts(profileId) {
@@ -147,6 +185,29 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
     if (platforms && platforms.length) accounts = accounts.filter((a) => platforms.includes(a.platform))
     if (!accounts.length)
       return { ok: false, reason: platforms ? `No ${platforms.join('/')} account connected yet` : 'No connected accounts on this profile yet' }
+
+    // Check the balance BEFORE publishing, so an empty account is refused in
+    // words the agent can pass on rather than failing halfway through with a
+    // provider error. One credit per platform: FB+IG+TikTok costs 3.
+    //
+    // Fails OPEN when the usage endpoint is unreachable, for the same reason
+    // claimPostOnce does: a check that cannot run must not block a legitimate
+    // post. postingCredits() returns null for that case, never 0.
+    if (provider() === 'postpeer') {
+      const need = new Set(accounts.map((a) => a.platform)).size
+      const have = await postingCredits()
+      // Only an EMPTY account is refused, not a short one. PostPeer publishes
+      // what it can afford and reports `partial` (handled below), so refusing
+      // when have < need would turn posts it would have published into none.
+      // Nobody has verified what it does with a partly-funded post, and finding
+      // out costs credits - so the guard stays where the answer is not in doubt.
+      if (have === 0) {
+        // Drop the dedupe claim, or the re-approval after the top-up looks like
+        // a duplicate and gets swallowed inside the 10-minute window.
+        await releasePostOnce(fp)
+        return { ok: false, blocked: 'noCredits', reason: OUT_OF_CREDITS, credits: { have, need } }
+      }
+    }
 
     const short = (captionShort || caption || '').slice(0, 90)
 

@@ -4,8 +4,8 @@
 // (listing → per-platform × per-language copy). Falls back to labelled demo
 // output when no key is configured or a call fails, so the app never dead-ends.
 
-import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt, buildCoverPrompt } from './_lib/prompts.js'
-import { runModel, runModelVision, extractJson, providerStatus } from './_lib/providers.js'
+import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt, buildCoverPrompt, buildReadListingPrompt } from './_lib/prompts.js'
+import { runModel, runModelVision, extractJson, providerStatus, visionStatus } from './_lib/providers.js'
 import { demoContent, demoParse, demoPlan } from '../shared/demo.js'
 
 function send(res, status, payload) {
@@ -97,23 +97,80 @@ export default async function handler(req, res) {
     if (action === 'cover') {
       const { images } = body
       if (!Array.isArray(images) || images.length < 2) return send(res, 400, { error: 'need 2+ images' })
-      if (!status.configured) return send(res, 200, { demo: true, index: 0 }) // demo: keep first
-      // Vision is Gemini-only. When the caption engine runs on another provider
-      // (Groq), or Gemini is unavailable, choosing a cover is the one thing that
-      // cannot run — so fall back to the FIRST photo instead of failing the whole
-      // request. The sender's first photo is the cover by convention anyway, so
-      // this degrades to their own choice rather than to nothing.
+      // Choosing a cover is the one job that cannot run without vision, so it
+      // falls back to the FIRST photo rather than failing the whole request.
+      // The sender's first photo is the cover by convention anyway, so this
+      // degrades to their own choice rather than to nothing. The caller is told
+      // WHY in words - a raw upstream error string told an agent nothing.
+      const vision = visionStatus()
+      if (!vision.configured) {
+        return send(res, 200, { demo: false, degraded: true, index: 0, reason: `${vision.reason} - kept the first photo as cover` })
+      }
       try {
-        const out = await runModelVision(buildCoverPrompt(images.length), images)
+        const { text: out, provider } = await runModelVision(buildCoverPrompt(images.length), images)
         const parsed = extractJson(out)
         const idx = Math.max(0, Math.min(images.length - 1, Number(parsed?.index) || 0))
-        return send(res, 200, { demo: false, provider: status.provider, index: idx })
+        return send(res, 200, { demo: false, provider, index: idx })
       } catch (e) {
-        return send(res, 200, { demo: false, degraded: true, index: 0, error: String(e?.message || e).slice(0, 120) })
+        return send(res, 200, {
+          demo: false,
+          degraded: true,
+          index: 0,
+          reason: `vision failed on ${vision.chain.join(' then ')} - kept the first photo as cover`,
+          error: String(e?.message || e).slice(0, 120),
+        })
       }
     }
 
-    return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan", "refine" or "cover".' })
+    if (action === 'readlisting') {
+      const { images } = body
+      if (!Array.isArray(images) || images.length < 1) return send(res, 400, { error: 'need 1+ images' })
+      // OCR degrades to an EMPTY transcription, never a partial guess: the agent
+      // then types the listing as they do today. A half-read price is the one
+      // outcome worse than no OCR at all.
+      // Unauthenticated route taking base64 images, so it needs its own limits
+      // rather than relying on the platform's. Eight is more photos than any
+      // listing has needed, and a listing photo well under 6MB decoded.
+      const MAX_IMAGES = 8, MAX_BYTES = 6 * 1024 * 1024
+      if (images.length > MAX_IMAGES) return send(res, 400, { error: `Too many images (max ${MAX_IMAGES})` })
+      const tooBig = images.some((i) => (String(i?.data || '').length * 3) / 4 > MAX_BYTES)
+      if (tooBig) return send(res, 413, { error: 'One of those photos is too large to read' })
+
+      const vision = visionStatus()
+      const blank = (reason) => ({ degraded: true, reason, text: '', confidence: 'none', unreadable: [] })
+      if (!vision.configured) {
+        return send(res, 200, blank(`${vision.reason} - nothing was read, type the listing instead`))
+      }
+      try {
+        const { text: out, provider } = await runModelVision(buildReadListingPrompt(images.length), images)
+        const parsed = extractJson(out)
+        // Take only the three fields we asked for. A model that also returns a
+        // "price" it worked out must not have it forwarded as if it were read
+        // off the image.
+        const text = typeof parsed?.text === 'string' ? parsed.text.trim() : ''
+        // Case-fold first: a model answering "High" used to land as 'low',
+        // which is the signal telling the agent to retype the price by hand.
+        const said = String(parsed?.confidence || '').trim().toLowerCase()
+        const confidence = ['high', 'medium', 'low', 'none'].includes(said) ? said : 'low'
+        const unreadable = Array.isArray(parsed?.unreadable)
+          ? parsed.unreadable.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim())
+          : []
+        return send(res, 200, {
+          degraded: false,
+          provider,
+          text,
+          confidence: text ? confidence : 'none',
+          unreadable,
+        })
+      } catch (e) {
+        return send(res, 200, {
+          ...blank(`vision failed on ${vision.chain.join(' then ')} - nothing was read, type the listing instead`),
+          error: String(e?.message || e).slice(0, 120),
+        })
+      }
+    }
+
+    return send(res, 400, { error: 'Unknown action. Use "parse", "content", "plan", "refine", "cover" or "readlisting".' })
   } catch (err) {
     // Never dead-end a demo: on a real API failure, degrade to labelled samples.
     const message = err?.message || String(err)
@@ -135,7 +192,10 @@ export default async function handler(req, res) {
       return send(res, 200, { demo: true, degraded: true, error: message, text: body.text })
     }
     if (action === 'cover') {
-      return send(res, 200, { demo: true, degraded: true, error: message, index: 0 })
+      return send(res, 200, { demo: true, degraded: true, error: message, reason: 'cover selection failed - kept the first photo as cover', index: 0 })
+    }
+    if (action === 'readlisting') {
+      return send(res, 200, { degraded: true, error: message, reason: 'listing OCR failed - nothing was read, type the listing instead', text: '', confidence: 'none', unreadable: [] })
     }
     return send(res, 500, { error: message })
   }

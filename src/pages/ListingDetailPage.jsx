@@ -64,6 +64,10 @@ export default function ListingDetailPage() {
       if (images.length < 2) throw new Error('Could not read the photos')
       const r = await pickCover(images)
       if (r.demo) return toast('Auto-pick cover runs live on the deployed app (needs an AI key)', 'warn')
+      // A degraded answer still carries index 0, which used to fall through to
+      // "First photo is already the best cover ✓" - a green tick saying the
+      // photos had been looked at when nothing had run at all.
+      if (r.degraded) return toast(r.reason || 'Could not look at the photos just now — cover left as it is', 'warn')
       const i = r.index || 0
       if (i > 0 && i < photos.length) {
         patch((l) => ({ ...l, photos: [photos[i], ...photos.filter((_, idx) => idx !== i)] }))

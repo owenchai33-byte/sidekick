@@ -1,6 +1,9 @@
-// Provider abstraction for the content engine. One `runModel(prompt)` entry
-// point; adapters for Gemini (free tier, default) and Claude (ready to flip on
-// via AI_PROVIDER=claude once revenue covers the pennies-per-listing).
+// Provider abstraction for the content engine. Two entry points -
+// `runModel(prompt)` for text and `runModelVision(prompt, images)` for photos -
+// each walking its own chain; adapters for Gemini (free tier, default) and
+// Claude (ready to flip on via AI_PROVIDER=claude once revenue covers the
+// pennies-per-listing). The two chains are separate because the text primary
+// (Groq) cannot see images.
 //
 // Reads config from process.env at call time so dev middleware and Vercel
 // functions behave identically.
@@ -24,6 +27,20 @@ const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
 // count. Blowing the budget would turn a slow caption into a dead request, which
 // is worse than a degraded one.
 const TRANSIENT = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+
+// Not every 429 is worth waiting for. A rate limit clears in seconds; a depleted
+// prepaid balance or an exhausted daily quota clears when somebody pays, which
+// no retry budget can outlast. Measured 2026-09-03 against the real (depleted)
+// Gemini key: retrying its 429 spent 11.8 seconds and seven image uploads before
+// giving up, on a Vercel function that is killed at about ten - so the caller
+// never even received the degraded answer. Treated as permanent, the same call
+// fails over in well under a second.
+const SPENT = /prepayment credits are depleted|quota|billing|exceeded your current quota|insufficient|payment/i
+function isTransient(status, body) {
+  if (!TRANSIENT.has(status)) return false
+  if (status === 429 && SPENT.test(String(body || ''))) return false
+  return true
+}
 // 6s could not outlast a per-MINUTE rate limit, so a morning burst degraded
 // captions that would have succeeded seconds later. 75s covers Groq's window
 // with room to spare. Callers are background jobs holding a WhatsApp "building
@@ -145,7 +162,7 @@ async function runGemini(prompt) {
     const detail = await res.text().catch(() => '')
     const err = new Error(`Gemini ${res.status}: ${detail.slice(0, 300)}`)
     err.status = res.status
-    err.transient = TRANSIENT.has(res.status)
+    err.transient = isTransient(res.status, detail)
     throw err
   }
   const data = await res.json()
@@ -177,7 +194,7 @@ async function runClaude(prompt) {
     const detail = await res.text().catch(() => '')
     const err = new Error(`Anthropic ${res.status}: ${detail.slice(0, 300)}`)
     err.status = res.status
-    err.transient = TRANSIENT.has(res.status)
+    err.transient = isTransient(res.status, detail)
     throw err
   }
   const data = await res.json()
@@ -214,7 +231,7 @@ async function runGroq(prompt) {
     const detail = await res.text().catch(() => '')
     const err = new Error(`Groq ${res.status}: ${detail.slice(0, 300)}`)
     err.status = res.status
-    err.transient = TRANSIENT.has(res.status)
+    err.transient = isTransient(res.status, detail)
     // A rate limit is not a failure, it is a queue. Groq says exactly how long
     // to wait; honour it instead of burning the budget on blind backoff.
     if (res.status === 429) err.retryAfterMs = parseRetryAfter(res.headers, detail)
@@ -247,14 +264,111 @@ export function extractJson(text) {
   }
 }
 
-// Vision: prompt + inline images → text (used to pick the best cover photo).
-// Gemini-only for now (the free default); other providers throw.
+// Vision: prompt + inline images -> text (cover-photo choice, listing OCR).
+//
+// This used to be Gemini-only and threw without GEMINI_API_KEY, so the day
+// Gemini's billing ran dry (HTTP 429 "prepayment credits are depleted") every
+// cover choice silently became "photo 0" and OCR was impossible. It now walks a
+// chain the same way the text path does.
+//
+// Only providers that can actually see images belong here: production runs
+// AI_PROVIDER=groq, and Groq's free gpt-oss models take text only, so a vision
+// call that inherited the text primary would 400 on every photo.
+const VISION_KEYED = { gemini: 'GEMINI_API_KEY', claude: 'ANTHROPIC_API_KEY' }
+
+// Gemini answers a depleted billing account with 429 - the same status a burst
+// rate limit uses, but this one never recovers. Retrying it to the full text
+// budget (75s) would hold a cover request open until the function itself times
+// out, so vision gets a shorter one and moves to the next provider instead.
+const visionBudgetMs = () => Number(process.env.AI_VISION_RETRY_BUDGET_MS || 12000)
+
+// Anthropic rejects anything outside this set, and a WhatsApp photo arrives
+// labelled "image/jpg" or with a charset suffix often enough to matter.
+const ANTHROPIC_MEDIA = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+function anthropicMediaType(mime) {
+  const m = String(mime || '').split(';')[0].trim().toLowerCase()
+  if (m === 'image/jpg') return 'image/jpeg'
+  return ANTHROPIC_MEDIA.has(m) ? m : 'image/jpeg'
+}
+
+/**
+ * Vision providers to try, in order: VISION_PROVIDER (falling back to the text
+ * AI_PROVIDER), then VISION_FALLBACK_PROVIDER (falling back to
+ * AI_FALLBACK_PROVIDER), then any remaining keyed vision provider.
+ *
+ * That last step is the point of the whole thing: with AI_PROVIDER=groq the
+ * first two steps yield nothing, and a configured ANTHROPIC_API_KEY sitting
+ * unused is exactly how cover selection went dark. A provider is only tried
+ * when its key is present, so an absent key still costs nothing.
+ */
+export function visionChain() {
+  const first = (process.env.VISION_PROVIDER || process.env.AI_PROVIDER || 'gemini').toLowerCase()
+  const listed = (process.env.VISION_FALLBACK_PROVIDER || process.env.AI_FALLBACK_PROVIDER || '')
+    .toLowerCase().split(',').map((x) => x.trim()).filter(Boolean)
+  const seen = new Set()
+  return [first, ...listed, ...Object.keys(VISION_KEYED)].filter((p) => {
+    if (seen.has(p) || !VISION_KEYED[p] || !process.env[VISION_KEYED[p]]) return false
+    seen.add(p)
+    return true
+  })
+}
+
+// Why a caller may not get vision, in words a WhatsApp reply can carry. Callers
+// degrade on this instead of on a raw upstream error string.
+export const VISION_UNCONFIGURED =
+  'no vision provider key is configured — set GEMINI_API_KEY or ANTHROPIC_API_KEY (and VISION_PROVIDER if you want a specific one)'
+
+export function visionStatus() {
+  const chain = visionChain()
+  return {
+    chain,
+    provider: chain[0] || null,
+    configured: chain.length > 0,
+    reason: chain.length ? null : VISION_UNCONFIGURED,
+  }
+}
+
+function visionAdapterFor(p) {
+  return p === 'claude' ? runClaudeVision : runGeminiVision
+}
+
+/**
+ * Run the first vision provider that has a key, falling through on failure.
+ * images = [{ mimeType, data }] where data is raw base64 (no data: prefix).
+ * Returns { text, provider } — the provider that ANSWERED, not the one
+ * configured, so a degraded reply cannot name a model that never ran.
+ * Throws when nothing can run; callers must degrade, never invent.
+ */
 export async function runModelVision(prompt, images) {
+  const chain = visionChain()
+  if (!chain.length) {
+    const err = new Error(VISION_UNCONFIGURED)
+    err.visionUnconfigured = true
+    throw err
+  }
+  const deadline = Date.now() + visionBudgetMs()
+  let lastErr
+  for (const p of chain) {
+    try {
+      const text = await withRetry(() => visionAdapterFor(p)(prompt, images), deadline)
+      return { text, provider: p }
+    } catch (e) {
+      lastErr = e
+      if (Date.now() >= deadline) break
+    }
+  }
+  throw lastErr || new Error('all vision providers failed')
+}
+
+async function runGeminiVision(prompt, images) {
   const key = process.env.GEMINI_API_KEY
-  if (!key) throw new Error('GEMINI_API_KEY not set (vision needs Gemini)')
-  const model = process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
+  if (!key) throw new Error('GEMINI_API_KEY not set')
+  const model = process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-  const parts = [{ text: prompt }, ...images.map((img) => ({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.data } }))]
+  const parts = [
+    { text: prompt },
+    ...images.map((img) => ({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.data } })),
+  ]
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
@@ -262,8 +376,53 @@ export async function runModelVision(prompt, images) {
   })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Gemini vision ${res.status}: ${detail.slice(0, 200)}`)
+    const err = new Error(`Gemini vision ${res.status}: ${detail.slice(0, 200)}`)
+    err.status = res.status
+    err.transient = isTransient(res.status, detail)
+    throw err
   }
   const data = await res.json()
-  return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
+  if (!text) throw new Error('Gemini vision returned no text')
+  return text
+}
+
+async function runClaudeVision(prompt, images) {
+  const key = process.env.ANTHROPIC_API_KEY
+  if (!key) throw new Error('ANTHROPIC_API_KEY not set')
+  const model = process.env.ANTHROPIC_VISION_MODEL || process.env.ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL
+  // No JSON response mode on this API - the prompts ask for raw JSON and
+  // extractJson() strips a fence if one comes back anyway.
+  const content = [
+    ...images.map((img) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: anthropicMediaType(img.mimeType), data: img.data },
+    })),
+    { type: 'text', text: prompt },
+  ]
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      temperature: 0.2,
+      messages: [{ role: 'user', content }],
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    const err = new Error(`Anthropic vision ${res.status}: ${detail.slice(0, 200)}`)
+    err.status = res.status
+    err.transient = isTransient(res.status, detail)
+    throw err
+  }
+  const data = await res.json()
+  const text = (data?.content || []).map((b) => b.text || '').join('')
+  if (!text) throw new Error('Anthropic vision returned no text')
+  return text
 }

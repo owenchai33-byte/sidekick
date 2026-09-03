@@ -367,3 +367,29 @@ Pick the one that best sells the property: a clear, well-lit hero shot — the e
 
 Return ONLY JSON: {"index": N} where N is the 0-based number of the best cover photo.`
 }
+
+/** READLISTING: photos/screenshots of a listing → the text that is actually in
+ *  them. OCR, not extraction: the parse prompt above turns text into fields, so
+ *  this one only has to read. */
+export function buildReadListingPrompt(count) {
+  return `You are transcribing ${count} image${count === 1 ? '' : 's'} an estate agent in Kuching, Sarawak sent: photos or screenshots of a property listing (a WhatsApp message, a flyer, a poster, a portal page). Read the text out of them.
+
+You are a TRANSCRIBER, not a copywriter and not an analyst. Transcribe what is visibly written. Nothing else.
+
+HARD RULES — a wrong number here becomes a wrong number on a real public listing, and that is worse than no OCR at all:
+- NEVER infer, complete, correct or reformat a PRICE, a PHONE NUMBER or a SIZE. Copy the digits exactly as printed, including "k", "juta", "RM", "/month", "sq ft", spaces and dashes. If a digit is blurred, cropped or ambiguous, do NOT guess the whole number — leave that value out of "text" and name the field in "unreadable".
+- NEVER add a fact that is not printed in the image: no bedrooms, no tenure, no furnishing, no area name, no agent name you cannot actually read.
+- Do not translate. Keep the original language and mixed English/Malay/Chinese exactly as written.
+- Do not tidy the wording. Keep the agent's own lines, emoji and ordering; keep line breaks.
+- If the images contain no listing text at all (they are only photos of rooms), return an empty "text" and confidence "none". An empty answer is a correct answer.
+
+Return ONLY a JSON object — no markdown, no code fences, no commentary:
+{
+  "text": string,              // the transcription, verbatim, line breaks kept. "" if there is no readable listing text.
+  "confidence": "high" | "medium" | "low" | "none",
+                               // high = every character is crisp; medium = readable but some doubt;
+                               // low = you had to strain; none = nothing readable.
+  "unreadable": string[]       // names of fields you could NOT read cleanly, e.g. ["price","phone"].
+                               // Anything you left out because you were unsure MUST be named here.
+}`
+}

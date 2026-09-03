@@ -84,7 +84,10 @@ export default async function handler(req, res) {
   if (!r.ok) {
     // Nothing was published: drop the claim and leave it pending so they can retry.
     await releasePending(id)
-    return send(res, r.error ? 502 : 200, { ok: false, id, reason: r.reason, error: r.error, retryable: true })
+    // Carry `blocked` through. postToConnected refuses for reasons the agent
+    // layer has to phrase differently (out of credits vs a bad caption), and
+    // dropping the flag left it with nothing to branch on but prose.
+    return send(res, r.error ? 502 : 200, { ok: false, id, reason: r.reason, error: r.error, retryable: true, ...(r.blocked ? { blocked: r.blocked } : {}) })
   }
 
   await appendFeed({
