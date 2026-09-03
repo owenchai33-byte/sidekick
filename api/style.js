@@ -46,7 +46,15 @@ export default async function handler(req, res) {
     try {
       if (body?.kind === 'brand') {
         return send(res, 200, await saveBrand(profile, { color: body?.color, name: body?.name }))
-      if ((body?.kind || '') === 'rules')
+      }
+      // This branch sat INSIDE the brand block, after its return: unreachable,
+      // and gated on a kind it could never have. Every `remember` therefore fell
+      // through to saveStyle, which ignores `rule`, answered with the style
+      // object, and the CLI read `.rules` off it as an empty list - so the agent
+      // was told "ok, remembered" while nothing was written, for every rule any
+      // agent ever taught. Caught 2026-09-03 by asking the API instead of
+      // calling saveRule() directly, which is what the unit tests had been doing.
+      if ((body?.kind || '') === 'rules') {
         return send(res, 200, await saveRule(profile, { rule: body?.rule, replace: body?.rules }))
       }
       return send(res, 200, await saveStyle(profile, { style: body?.style, examples: body?.examples }))
