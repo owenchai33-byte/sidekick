@@ -183,8 +183,16 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
   try {
     let accounts = await connectedAccounts(profileId)
     if (platforms && platforms.length) accounts = accounts.filter((a) => platforms.includes(a.platform))
-    if (!accounts.length)
+    if (!accounts.length) {
+      // Nothing was sent, so the claim must not stand. Confirmed 2026-09-03:
+      // the agent taps the tick with Instagram not yet linked, approve.js
+      // answers retryable:true and AGENTS.md tells the agent to retry that id —
+      // and the retry hit a claim nobody released, came back duplicate:true, and
+      // the agent told the human it had already posted. The listing was
+      // unpublishable for the full 10-minute window behind a false success.
+      await releasePostOnce(fp)
       return { ok: false, reason: platforms ? `No ${platforms.join('/')} account connected yet` : 'No connected accounts on this profile yet' }
+    }
 
     // Check the balance BEFORE publishing, so an empty account is refused in
     // words the agent can pass on rather than failing halfway through with a
@@ -223,7 +231,15 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
         body: JSON.stringify({ content: caption, mediaItems, platforms: targets, publishNow: true }),
       })
       const t = await r.text().catch(() => '')
-      if (!r.ok) return { ok: false, error: `PostPeer ${r.status} ${t.slice(0, 200)}` }
+      // The claim deliberately STAYS. A 400 or 401 really does mean nothing was
+      // accepted, but a 502/504 from a gateway in front of PostPeer means the
+      // request may have been processed and only the response lost - and
+      // releasing on that lets a retry double-post to a client's public page.
+      // We cannot tell the two apart from here, and a silent ten-minute refusal
+      // is the lesser harm.
+      if (!r.ok) {
+        return { ok: false, error: `PostPeer ${r.status} ${t.slice(0, 200)}` }
+      }
 
       // The response is 202 Accepted and carries per-platform results. Reporting
       // "posted to all" just because the HTTP call worked is how a listing that
@@ -259,7 +275,22 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
 
       // No per-platform detail came back — stay optimistic but say which state we saw.
       if (!plats.length) return { ok: true, platforms: targets.map((p) => p.platform), postId: d.postId, status }
-      if (!posted.length) return { ok: false, error: failed.join(' | ') || `PostPeer status ${status}`, postId: d.postId }
+      // The claim STAYS here too, and the branch name is the trap: `!posted.length`
+      // is NOT "every platform failed". `ok2` counts only status 'published', and
+      // the poll loop above gives up after 6 x 2s - so a post PostPeer accepted
+      // and is still uploading (a TikTok reel, every time) lands here with an
+      // error that literally reads "facebook: pending". Releasing on that let a
+      // retry publish the whole set a second time; measured 2026-09-04, two
+      // publish calls where there should have been one.
+      if (!posted.length) {
+        return { ok: false, error: failed.join(' | ') || `PostPeer status ${status}`, postId: d.postId }
+      }
+      // PARTIAL is the opposite case and the claim STAYS. Some platforms are
+      // already live; releasing here would let a retry re-publish the whole set
+      // and double-post to the ones that succeeded — a duplicate on the client's
+      // public page, which is worse than the failed platform staying unposted.
+      // The caller sees the failure in partialErrors and re-sends only that
+      // platform (a different fingerprint, so it is not blocked).
       return {
         ok: true, platforms: posted, postId: d.postId, status,
         ...(failed.length ? { partialErrors: failed } : {}),
@@ -286,7 +317,12 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
       if (pr.ok) posted.push(...targets.map((p) => p.platform))
       else errors.push(`${targets.map((p) => p.platform).join('/')}: ${pr.status} ${ptext.slice(0, 120)}`)
     }
-    if (!posted.length) return { ok: false, error: errors.join(' | ') }
+    // Same reasoning as PostPeer above: `posted` only fills on a 2xx, so an
+    // all-groups-failed result cannot be told apart from a gateway swallowing
+    // the response of a request that WAS processed. The claim stays.
+    if (!posted.length) {
+      return { ok: false, error: errors.join(' | ') }
+    }
     return { ok: true, platforms: posted, ...(errors.length ? { partialErrors: errors } : {}) }
   } catch (e) {
     await releasePostOnce(fp)

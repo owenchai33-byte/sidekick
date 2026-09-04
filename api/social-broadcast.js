@@ -20,8 +20,48 @@ function readJson(req) {
   })
 }
 
+// True when this POST looks like it came from the app's own pages.
+//
+// BE CLEAR ABOUT WHAT THIS IS NOT. It is not authentication. A browser cannot
+// forge these headers, so it stops a cross-site page attacking a logged-in user
+// - but curl, a cron or the agent's exec tool sets any of them with one -H, and
+// the exec tool IS what caused the 2026-09-01 incident. Verified 2026-09-04: a
+// bare `-H "sec-fetch-site: same-origin"` walks straight through, and so does a
+// forged Origin, because the host it is compared against is client-supplied too.
+//
+// It exists only so the web UI keeps working, since those pages cannot hold
+// INGEST_SECRET. The real protection on this route is the demo-caption check and
+// the dedupe claim below, which are what actually stopped the incident. Treat
+// this as a speed bump; the proper fix is a session the UI can present.
+function fromOwnUi(req) {
+  const h = req.headers || {}
+  const site = String(h['sec-fetch-site'] || '')
+  if (site === 'same-origin' || site === 'same-site') return true
+  const host = String(h['x-forwarded-host'] || h.host || '')
+  if (!host) return false
+  const hostOf = (v) => { try { return new URL(String(v)).host } catch { return '' } }
+  return hostOf(h.origin) === host || hostOf(h.referer) === host
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
+
+  // AUTH. This route was wide open: anyone with the deployed URL could publish
+  // to a client's Facebook, and on 2026-09-01 the agent's exec tool called it
+  // directly to skip the approve pipeline. The shared secret is what /api/ingest
+  // and /api/approve use, so OpenClaw and any server-side caller present that.
+  //
+  // The four in-app callers (ConnectPage, CreatePostPage, ListingDetailPage,
+  // ContentPostCard) are browser fetches with no credential to send, and the
+  // portal has no login to hang a session on - so they are admitted by the
+  // same-origin check instead. That stops scripted access, not a human who can
+  // already load the portal; a per-agent login is the follow-up.
+  const secret = process.env.INGEST_SECRET
+  const provided = req.headers['x-ingest-secret'] || (new URL(req.url, 'http://x').searchParams.get('secret')) || ''
+  if (!(secret && provided === secret) && !fromOwnUi(req)) {
+    return send(res, 401, { error: 'Bad or missing x-ingest-secret' })
+  }
+
   const { configured } = providerConfigured()
   if (!configured) return send(res, 501, { error: 'Posting provider not connected — set its API key in Vercel' })
 

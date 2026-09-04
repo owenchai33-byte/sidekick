@@ -134,17 +134,31 @@ ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
+// Returns { script, caption, degraded, reason }. `degraded` means the model never
+// wrote this and it is the template below. It used to come back unmarked, so the
+// Mac rendered it, /api/hold stored it with nothing to flag, and approve.js had
+// nothing to refuse: pending e5f48cc5 sat one ✅ away from putting "Property in
+// Kuching — RM1,300 a month" on TikTok while the same listing's FB/IG post was
+// correctly blocked. The FB caption path has said `degraded` since the Gemini 429s;
+// the reel is the same advert, under the same agent's name, and needs to say it too.
 async function reelScript(listing, status, styleGuide, rules) {
   if (status.configured) {
     try {
       const j = extractJson(await runModel(buildReelPrompt(listing, styleGuide, rules)))
-      if (j && j.script) return { script: String(j.script), caption: String(j.caption || '') }
+      if (j && j.script) return { script: String(j.script), caption: String(j.caption || ''), degraded: false }
     } catch { /* fall through */ }
   }
   const money = listing.price != null ? `RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? ' a month' : ''}` : ''
   const loc = listing.location || 'Kuching'
   const script = `Looking for a place in ${loc}? This ${listing.propertyType || 'one'}${listing.bedrooms != null ? ` has ${listing.bedrooms} bedrooms` : ''}${money ? `, and it's ${money}` : ''}. Trust me, it won't last long. DM me now before it's gone.`
-  return { script, caption: `${listing.propertyType || 'Property'} in ${loc} ${money ? '— ' + money : ''} 🏡 #KuchingProperty #Sarawak #PropertyMalaysia` }
+  return {
+    script,
+    caption: `${listing.propertyType || 'Property'} in ${loc} ${money ? '— ' + money : ''} 🏡 #KuchingProperty #Sarawak #PropertyMalaysia`,
+    degraded: true,
+    reason: status.configured
+      ? 'the reel writer failed — this is the deterministic template script, not this agent\'s voice'
+      : 'no AI provider configured — this is the deterministic template script, not this agent\'s voice',
+  }
 }
 
 // A ≤90-char title for platforms that cap the caption (TikTok photo slideshows).
@@ -263,8 +277,17 @@ export default async function handler(req, res) {
         if (rv2.invented.length < rv.invented.length) rs = retry
       }
     }
+    // Hand the flag to the caller so it can pass it straight to /api/hold. Not a
+    // refusal here: the Mac still gets its script, and the ✅ is where a template
+    // is stopped — /api/hold also recognises this template on its own, because the
+    // reel caller lives outside this repo and may not forward the flag yet.
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
+      captionDegraded: !!rs.degraded,
+      ...(rs.degraded ? {
+        captionDegradedReason: rs.reason,
+        captionWarning: `the reel writer failed — this is generic template copy, NOT this agent's voice. Do not publish it; pass captionDegraded:true to /api/hold.`,
+      } : {}),
       card: card || media[0]?.url || null, profileId: postProfile, brandApplied,
       listing: { price: listing.price ?? null, location: listing.location || null, bedrooms: listing.bedrooms ?? null, bathrooms: listing.bathrooms ?? null, sqft: listing.sqft ?? null, propertyType: listing.propertyType || null, listingType: listing.listingType },
     })
@@ -282,7 +305,7 @@ export default async function handler(req, res) {
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
-  const { caption, degraded: captionDegraded } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
+  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
@@ -340,8 +363,11 @@ export default async function handler(req, res) {
       platforms,
       // Persisted so approve.js can refuse server-side. The agent is TOLD not to
       // publish a degraded caption (AGENTS.md), but instructions are not a
-      // guarantee — approve must be able to check for itself.
+      // guarantee — approve must be able to check for itself. The reason travels
+      // with it so a refused ✅ can say WHICH failure this was, the same shape
+      // /api/hold now writes.
       captionDegraded,
+      captionDegradedReason: captionDegraded ? captionDegradedReason : null,
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,
