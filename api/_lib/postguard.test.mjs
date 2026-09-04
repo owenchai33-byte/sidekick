@@ -433,3 +433,45 @@ describe('money written in Chinese', () => {
     expect(captionViolations('Terrace RM338,000, 3 bed. Fill in the form 3 times.', l).invented).toEqual([])
   })
 })
+
+// A contact line is not a property name.
+//
+// "Call Jason 0128887766" and "Hubungi Azlan 0198887766" were both returned as
+// REQUIRED names. A missing name blocks in ingest.js, so a caption that wrote
+// the contact as "Jason 0128887766" — which is what a caption does — was refused
+// every time. Found 2026-09-04 while answering "is it ready": three ordinary
+// listings, English, Malay and an all-caps room ad, all blocked. Same shape as
+// the one-line bug the day before: the extractor treating whatever is
+// capitalised near the top as a name.
+describe('contact lines and property types are not property names', () => {
+  const blocked = (caption, listing) =>
+    captionViolations(caption, listing).missing.some((m) => /property name/i.test(m))
+
+  it('lets a Malay caption reformat "Hubungi Azlan" as "Azlan"', () => {
+    const l = { listingType: 'sale', price: 520000, rawText: 'Rumah teres Kuching dijual. Harga RM520,000. Hubungi Azlan 0198887766' }
+    expect(blocked('Rumah Teres Kuching — RM520,000\nAzlan 0198887766', l)).toBe(false)
+  })
+
+  it('lets an English caption reformat "Call Jason" as "Jason"', () => {
+    const l = { listingType: 'sale', price: 880000, bedrooms: 4, bathrooms: 3, rawText: 'Semi D Batu Kawa for sale. RM880,000. 4 bed 3 bath. Call Jason 0128887766' }
+    expect(blocked('Semi D Batu Kawa — RM880,000\n4 bed 3 bath\nJason 0128887766', l)).toBe(false)
+  })
+
+  it('does not demand "ROOM FOR RENT" from an all-caps room ad', () => {
+    const l = { listingType: 'rental', price: 500, rawText: 'ROOM FOR RENT TABUAN JAYA RM500 PER MONTH CALL 0123456789' }
+    expect(blocked('Room for rent, Tabuan Jaya — RM500 per month\nCall 0123456789', l)).toBe(false)
+  })
+
+  it('still refuses a caption that drops the actual property name', () => {
+    // The guard has to keep doing its job: this is why it exists.
+    const l = { listingType: 'sale', price: 338000, rawText: 'Tropics City For Sale\nRM338,000\n800 sqft\nEdward 0183929100' }
+    expect(blocked('A condo in Kuching — RM338,000, 800 sqft. Edward 0183929100', l)).toBe(true)
+  })
+
+  it('still finds the name in the shapes it always could', () => {
+    expect(propertyNames('Tropics City For Sale\nRM338,000', {})[0]).toBe('Tropics City')
+    expect(propertyNames('Brand New RENNA RESIDENCE for Rent. The Northbank', {})[0]).toBe('RENNA RESIDENCE')
+    expect(propertyNames('RIVERINE DIAMOND KUCHING For Sale', {})[0]).toBe('RIVERINE DIAMOND')
+    expect(propertyNames('Batu Kawa Commercial Land For Sale', {})[0]).toBe('Batu Kawa')
+  })
+})

@@ -153,7 +153,7 @@ export function propertyNames(rawText, listing) {
     // ATTACHED to one: "Tropics City For Sale" is the property "Tropics City".
     // Discarding the whole phrase lost the name entirely; trim the generic words
     // off the edges and keep the core.
-    const GENERIC = /^(for|sale|rent|unit|bedroom|bedrooms|bathroom|bathrooms|rare|price|value|details|location|investment|property|selling|below|bank|current|rental|annual|gross|yield|contact|lister|prime|kuching|sarawak|sqft|sq|ft|bed|beds|bath|baths|floor|storey|story|carpark|month|nego|furnished|furnishing|land|lot|commercial|residential|area|acre|acres|agent|zone|freehold)$/i
+    const GENERIC = /^(for|sale|rent|unit|bedroom|bedrooms|bathroom|bathrooms|rare|price|value|details|location|investment|property|selling|below|bank|current|rental|annual|gross|yield|contact|lister|prime|kuching|sarawak|sqft|sq|ft|bed|beds|bath|baths|floor|storey|story|carpark|month|nego|furnished|furnishing|land|lot|commercial|residential|area|acre|acres|agent|zone|freehold|call|hubungi|whatsapp|wasap|tel|telefon|hp|per|room|rooms|studio|apartment|condo|condominium|terrace|teres|semi|detached|bungalow|shoplot|shop|office|house|rumah|bilik|tanah|homestay|penthouse|duplex|townhouse)$/i
     let parts = name.split(/\s+/)
     while (parts.length && GENERIC.test(parts[0])) parts.shift()
     while (parts.length && GENERIC.test(parts[parts.length - 1])) parts.pop()
@@ -171,7 +171,15 @@ export function propertyNames(rawText, listing) {
   // went missing from a caption. Marketing filler is never a name, and an
   // ALL-CAPS phrase almost always is.
   const FILLER = /^(brand|new|rare|beautiful|spacious|modern|luxury|prime|freehold|leasehold|the|this|fully|semi|partially|super|mega|hot|best|good|nice)$/i
-  const scored = [...new Set(out)]
+  // A contact line is not a property name. "Call Jason 0128887766" and
+  // "Hubungi Azlan 0198887766" were both being returned as REQUIRED names, and
+  // because a missing name blocks in ingest.js, a perfectly good caption that
+  // wrote the contact as "Jason 0128887766" was refused every time. Verified
+  // 2026-09-04 on three ordinary listings - English, Malay and an all-caps room
+  // ad - all three blocked. Same shape as the one-line bug the day before: the
+  // extractor reading whatever is capitalised near the top as a name.
+  const CONTACT_LEAD = /^(call|contact|hubungi|whatsapp|wasap|dm|pm|tel|telefon|hp|lister|agent|sila)\b/i
+  const scored = [...new Set(out)].filter((n) => !CONTACT_LEAD.test(n))
     .filter((n) => !n.split(/\s+/).every((w) => FILLER.test(w)))
     .map((n) => {
       let score = 0
