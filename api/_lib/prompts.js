@@ -2,7 +2,7 @@
 // and generating per-platform × per-language copy. Both instruct the model to
 // return raw JSON only. Files prefixed `_` are not treated as routes by Vercel.
 
-import { propertyNames } from './postguard.js'
+import { resolvePropertyName } from './postguard.js'
 
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
 
@@ -22,7 +22,8 @@ Return ONLY a JSON object — no markdown, no code fences, no commentary — wit
   "landSqft": number | null,         // LAND area only. Never put land size in "sqft".
   "tenure": "Freehold" | "Leasehold" | null,
   "furnishing": "Unfurnished" | "Partially Furnished" | "Fully Furnished" | null,
-  "title": string | null             // a short human label, e.g. "3-room terrace @ Batu Kawa"
+  "title": string | null,            // a short human label, e.g. "3-room terrace @ Batu Kawa"
+  "propertyName": string | null      // the building or project name, if the listing names one
 }
 
 Rules:
@@ -34,6 +35,18 @@ Rules:
   house (terrace/semi-D/detached) and sqft for an apartment/condo.
 - Malaysian land units: 1 point = 435.6 sq ft (1/100 acre); 1 acre = 43,560 sq ft.
   So "8.6 points" -> landSqft 3746, NOT sqft.
+- "title" is a DESCRIPTION you write. "propertyName" is a NAME the listing gives:
+  "Tropics City", "RENNA RESIDENCE", "Riverine Diamond", "The Northbank". Copy it
+  exactly as written, casing and all.
+- propertyName is null far more often than not, and null is the RIGHT answer for a
+  room ad, a plot of land, a shoplot or an unnamed terrace house. NEVER guess one
+  from the area or neighbourhood, the street, a nearby landmark or mall, the
+  property type, or the agent's own name — "walking distance to Kuching City Mall"
+  does NOT make this property "City Mall", and "Call Jason" does not make it
+  "Jason". If you are not sure the listing is naming the building itself, use null.
+- propertyName must be a substring of the listing text above. Use JSON null, never
+  the strings "N/A", "Unknown", "None", "-" or "null" — those are treated as a name
+  and would be demanded of every caption for this listing.
 - If a field is genuinely absent, use null. Never invent values.
 
 Listing text:
@@ -65,13 +78,27 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
   // The property's NAME as a labelled fact, not something to spot in prose.
   // Measured: Edward's listing puts "Tropics City" on line 2, right under a
   // headline line that says nearly the same thing - the model read line 2 as a
-  // duplicate and dropped it, losing the name in 2 of 6 captions. Extracted with
-  // the SAME function the validator uses, so the prompt and the gate can never
-  // disagree about what the name is.
-  const names = propertyNames(listing.rawText || '', listing)
-  const nameLine = names.length
-    ? `PROPERTY NAME: ${names[0]} — this is what the property is CALLED. It MUST appear in the caption, near the top. Do not treat it as a repeat of the headline.`
-    : null
+  // duplicate and dropped it, losing the name in 2 of 6 captions.
+  //
+  // The PARSER's propertyName is the authority, because it can also say "this
+  // listing has no name" - the capitalisation heuristic never could, and its
+  // guesses ("Sqft Fully Furnished", "City Mall", "Jason") were demanded of the
+  // caption as hard requirements three times in two days. The heuristic is kept
+  // as a fallback for listings parsed before the field existed, and it is phrased
+  // as a hint, matching postguard.js, where the same guess is only a warning.
+  //
+  // resolvePropertyName() is shared with postguard.js so the prompt and the gate
+  // cannot disagree about the name OR its strength, and it only calls the
+  // parser's answer a fact when the LISTING TEXT contains it. That check is not
+  // pedantry: printing an unverified propertyName as "it MUST appear in the
+  // caption" would publish a building name the listing never had, on a client's
+  // public page - a worse failure than the refusal it was meant to prevent.
+  const { name: propName, from: nameFrom } = resolvePropertyName(listing)
+  const nameLine = nameFrom === 'parser'
+    ? `PROPERTY NAME: ${propName} — this is what the property is CALLED. It MUST appear in the caption, near the top. Do not treat it as a repeat of the headline.`
+    : nameFrom === 'guess'
+      ? `PROPERTY NAME (best guess from the listing text): ${propName} — if this really is the building's name, keep it in the caption near the top. If it is only an area, a landmark or a person's name, ignore this line.`
+      : null
 
   const facts = [
     `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,

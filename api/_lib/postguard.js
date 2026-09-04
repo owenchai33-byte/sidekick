@@ -143,6 +143,16 @@ const MATERIAL_CLAIMS = [
   [/corner (lot|unit)/i, /corner/i],
 ]
 
+// A contact line is not a property name. "Call Jason 0128887766" and "Hubungi
+// Azlan 0198887766" were both being returned as REQUIRED names, and because a
+// missing name blocks in ingest.js, a good caption that wrote the contact as
+// "Jason 0128887766" was refused every time. Verified 2026-09-04 on three
+// ordinary listings - English, Malay and an all-caps room ad - all three
+// blocked. Module scope because resolvePropertyName() has to apply it to the
+// PARSER's answer too: the parser is the same model, reading the same text, and
+// "Call Jason" is exactly as available to it as it was to the regex.
+const CONTACT_LEAD = /^(call|contact|hubungi|whatsapp|wasap|dm|pm|tel|telefon|hp|lister|agent|sila)\b/i
+
 /** Multi-word proper names from the listing's opening lines ("Tropics City"). */
 export function propertyNames(rawText, listing) {
   const head = String(rawText || '').split('\n').slice(0, 5).join(' ')
@@ -171,14 +181,7 @@ export function propertyNames(rawText, listing) {
   // went missing from a caption. Marketing filler is never a name, and an
   // ALL-CAPS phrase almost always is.
   const FILLER = /^(brand|new|rare|beautiful|spacious|modern|luxury|prime|freehold|leasehold|the|this|fully|semi|partially|super|mega|hot|best|good|nice)$/i
-  // A contact line is not a property name. "Call Jason 0128887766" and
-  // "Hubungi Azlan 0198887766" were both being returned as REQUIRED names, and
-  // because a missing name blocks in ingest.js, a perfectly good caption that
-  // wrote the contact as "Jason 0128887766" was refused every time. Verified
-  // 2026-09-04 on three ordinary listings - English, Malay and an all-caps room
-  // ad - all three blocked. Same shape as the one-line bug the day before: the
-  // extractor reading whatever is capitalised near the top as a name.
-  const CONTACT_LEAD = /^(call|contact|hubungi|whatsapp|wasap|dm|pm|tel|telefon|hp|lister|agent|sila)\b/i
+  // CONTACT_LEAD (module scope) drops "Call Jason" and "Hubungi Azlan".
   const scored = [...new Set(out)].filter((n) => !CONTACT_LEAD.test(n))
     .filter((n) => !n.split(/\s+/).every((w) => FILLER.test(w)))
     .map((n) => {
@@ -201,6 +204,72 @@ export function propertyNames(rawText, listing) {
   if (!scored.length) return []
   const best = scored[0].score
   return scored.filter((x) => x.score === best).map((x) => x.n)
+}
+
+// WHOSE NAME IS IT, AND IS IT EVEN IN THE LISTING?
+//
+// The first cut of this change made listing.propertyName the authority and
+// required it verbatim. Review on 2026-09-04 measured what that costs: the
+// parser is the SAME model reading the SAME text that produced the three
+// heuristic incidents, and nothing checked its answer against the source. All
+// of these blocked every caption for their listing, permanently, after burning
+// two repair calls per attempt:
+//   propertyName "Sunway Vivaldi" on a listing that never says it   -> refused
+//   propertyName "N/A" / "Unknown" / "null" / "-"                    -> refused
+//   propertyName "Call Jason"                                        -> refused
+// Worse than the refusal: prompts.js was printing that same unverified name as
+// "it MUST appear in the caption", so a hallucinated building name would have
+// gone out on a client's public page. The heuristic could never do that - its
+// guesses were at least literally present in rawText.
+//
+// So the parser's answer is a fact only when the LISTING contains it. Anything
+// else falls back to the heuristic, whose guess is a warning and can never
+// refuse. Prompt and gate share this function, so they cannot disagree about
+// either the name or its strength.
+const NAME_PLACEHOLDER = /^(?:n\s*\/?\s*a|nil|none|null|undefined|unknown|not\s+\w+|tidak\s+\w+|tiada|无|沒有|没有|[-–—.?_\s]+)$/i
+const flatten = (v) => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+/**
+ * { name, from } where `from` is 'parser' (a fact - the listing says it, so the
+ * caption must too), 'guess' (advisory only) or null (this property has no
+ * name, which is the ordinary answer for a room ad, a plot of land or an
+ * unnamed terrace - the answer the capitalisation regex could never give).
+ */
+export function resolvePropertyName(listing) {
+  const src = String(listing?.rawText || '')
+  const raw = typeof listing?.propertyName === 'string' ? listing.propertyName.trim() : ''
+  const grounded = raw
+    && !NAME_PLACEHOLDER.test(raw)
+    && !CONTACT_LEAD.test(raw)
+    && flatten(src).includes(flatten(raw))
+    && flatten(raw) !== flatten(listing?.location)   // the area is its own field
+  if (grounded) return { name: raw, from: 'parser' }
+  const guess = propertyNames(src, listing)[0]
+  return guess ? { name: guess, from: 'guess' } : { name: null, from: null }
+}
+
+// Words that are the GENERIC half of a project name. "RENNA RESIDENCE" written
+// as "RENNA @ The Northbank", and "Vivacity Megamall Residence" written as
+// "Vivacity Residence", are both the same building - the parser is told to copy
+// the name exactly as written, so it returns the full marketing string while
+// the agent's house style writes the short form. Demanding the long form
+// refused both (measured 2026-09-04; the second is a regression the heuristic
+// did not have, because it returned the shorter form itself).
+const NAME_GENERIC = /^(?:the|and|at|de|di|residences?|residency|apartments?|condo|condominium|court|suites?|towers?|parks?|city|gardens?|heights|villas?|point|square|place|homes?|house|hills?|views?|phase|block|jaya|indah|permai|utama|baru|kuching|sarawak)$/i
+
+/**
+ * True when the caption carries the property's name. Full containment, or ANY
+ * distinctive word of it: a caption that says "RENNA" has not dropped the name,
+ * and the incident this rule exists for is a caption that names the property
+ * NOWHERE at all.
+ */
+export function carriesName(caption, name) {
+  const cap = flatten(caption)
+  if (!name) return true
+  if (cap.includes(flatten(name))) return true
+  const distinctive = String(name).split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length >= 4 && !NAME_GENERIC.test(t))
+  return distinctive.some((t) => cap.includes(t.toLowerCase()))
 }
 
 // Invented NUMBERS.
@@ -331,16 +400,174 @@ export function contradictsRoomCounts(caption, listing) {
   return out
 }
 
+// Checkable claims the caption makes and the listing never made.
+//
+// The INVENTED half was a fixed list of material claims plus money and room
+// counts. Nothing walked the caption BACK to the listing, so these three
+// published clean on 2026-09-04 against listings that state none of them:
+// "Guaranteed 8% rental yield", "2-year lease", "Gated and guarded, 24-hour
+// security, swimming pool, gym". Each is a promise a tenant or buyer acts on.
+//
+// Only CHECKABLE claims are added here. Open-ended adjectives ("modern",
+// "spacious", "prime") stay out on purpose: the prompt already bans them, they
+// cannot be verified against a listing, and a rule that tries would refuse good
+// captions - which is the failure mode this whole file is being rewritten to
+// stop.
+
+// -- yields ------------------------------------------------------------------
+// A yield figure only counts as a claim when the caption says, right there,
+// that the figure IS a yield.
+//
+// The first cut used a 24-character proximity window around any percentage.
+// Review on 2026-09-04 measured what that catches in this market, all against
+// a listing stating no percentage at all, all refused:
+//   "10% deposit, great return."            "Only 10% downpayment. Rental return is steady."
+//   "Strong yield here. Bank loan up to 90%."   "ROI is excellent. 90% margin of financing."
+//   "Deposit 10%, pulangan menarik."        "首付10%，回报稳定。"
+// "Loan up to 90%" is on a large share of Malaysian sale ads and "首付10%，回报
+// 稳定" is boilerplate Chinese agent copy, so this was not an edge case - and
+// the cascade is the reverted money bug verbatim: the repair prompt says
+// REMOVE "10% yield", there is no such phrase, the model deletes the true "10%
+// deposit" instead, the violation count drops and ingest.js accepts it.
+//
+// So: adjacency, not proximity. The figure and the yield word must sit in one
+// noun phrase with nothing between them but modifiers - no punctuation, no
+// other nouns. "8% rental yield" and "Gross ROI 4.62% p.a." are claims;
+// "10% deposit, great return" is not, in any of the three languages.
+const YIELD_MOD = '(?:gross|nett?|annual|annualised|rental|projected|estimated|guaranteed|expected|current)'
+const YIELD_NOUN = `(?:${YIELD_MOD}\\s+){0,3}(?:yield|roi|return\\s+on\\s+investment|rental\\s+returns?)\\b`
+const YIELD_CLAIM = [
+  // "gross yield of 4.6%", "ROI 4.62%", "yield ~ 5%"
+  new RegExp(`\\b${YIELD_NOUN}\\s*(?:of|at|is|:|=|~|≈|about|around|approx\\.?)?\\s*(\\d+(?:\\.\\d+)?)\\s*%`, 'gi'),
+  // "4.2% gross yield", "8% rental yield", "4.62% p.a. ROI"
+  new RegExp(`(\\d+(?:\\.\\d+)?)\\s*%\\s*(?:p\\.?\\s?a\\.?\\s*)?${YIELD_NOUN}`, 'gi'),
+  // 率 is load-bearing: 回报率 is a yield, 回报 on its own is "returns" and is
+  // ordinary copy ("回报稳定" = returns are steady).
+  /(?:回报率|收益率|租金回报率|投资回报率)\s*(?:约|大约|为|是)?\s*(\d+(?:\.\d+)?)\s*%/g,
+  /(\d+(?:\.\d+)?)\s*%\s*(?:的)?(?:回报率|收益率|租金回报率|投资回报率)/g,
+  // "sewa" likewise: "pulangan sewa 6%" is a yield, "pulangan menarik" is not.
+  /(?:pulangan|hasil)\s+sewa\s*(?:sebanyak\s+|kira-kira\s+)?(\d+(?:\.\d+)?)\s*%/gi,
+  /(\d+(?:\.\d+)?)\s*%\s*(?:pulangan|hasil)\s+sewa/gi,
+]
+
+// A figure the listing itself calls a rent. Clause-scoped, because the first
+// cut fed knownYields() from knownAmounts(), which returns square footage, psf
+// and any 3+ digit number - so "completed 2024" on a RM338,000 unit silently
+// authorised a 7.19% yield, and psf authorised three more. Every figure here
+// only ever WIDENS what a caption may say, so the loose end of this is a miss,
+// never a refusal.
+const RENT_MARKER = /rent(?:al|ed)?|sewa|租金|月租|年租|per\s*month|\/\s*month|a\s+month|sebulan|per\s*annum|setahun|monthly|annual/i
+const MONEY_TOKEN = /(?:\brm\s*)?(\d[\d,]*(?:\.\d+)?)\s*((?:k|juta|jt|mil|million)\b|万|萬)?/gi
+
+function rentFigures(listing) {
+  const out = new Set()
+  const add = (v) => { if (Number.isFinite(v) && v >= 100 && v < 1e6) out.add(v) }
+  for (const [k, v] of Object.entries(listing || {})) {
+    if (typeof v === 'number' && /rent|sewa|monthly/i.test(k)) add(v)
+  }
+  if (/rental/i.test(String(listing?.listingType || ''))) add(Number(listing?.price))
+  // one clause at a time, so "800 sqft. Rental 1,300/month" does not make 800 a rent
+  for (const frag of String(listing?.rawText || '').split(/[\n。；;]+|(?<=[a-z0-9)])\.\s/gi)) {
+    if (!RENT_MARKER.test(frag)) continue
+    for (const m of frag.matchAll(MONEY_TOKEN)) add(amountOf(m[1], m[2]))
+  }
+  return [...out]
+}
+
 /**
- * Returns { missing: [...], invented: [...] } - both empty means the caption
- * honours the listing. `listing` is the parsed listing incl. rawText.
+ * Every yield percentage this listing can justify: the ones it states outright,
+ * plus the ones a caption can honestly COMPUTE - a rent the listing names
+ * against a price the listing names, read both as a monthly rent and as an
+ * already-annual one. Deliberately generous: a yield the agent worked out
+ * themselves must never be called a lie.
+ */
+export function knownYields(listing) {
+  const src = String(listing?.rawText || '')
+  const out = new Set()
+  for (const m of src.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) out.add(parseFloat(m[1]))
+  // 50,000 splits "a price" from "a rent" in this market.
+  const prices = knownAmounts(listing).filter((a) => a >= 50000)
+  for (const p of prices) {
+    for (const r of rentFigures(listing)) {
+      out.add((r * 12 / p) * 100)   // a monthly rental against the asking price
+      out.add((r / p) * 100)        // the same sum when the rent is already annual
+    }
+  }
+  return [...out].filter((v) => Number.isFinite(v))
+}
+
+/** 0.3 of a percentage point, so 4.6% and 4.62% are the same claim. */
+const yieldKnown = (v, known) => known.some((k) => Math.abs(k - v) <= 0.3)
+
+// -- lease / tenancy terms: DELETED 2026-09-04, and not coming back ----------
+//
+// The rule was: "2-year lease" / "12-month tenancy" in the caption, cleared
+// only by a duration of the same length somewhere in the listing. It was
+// removed rather than narrowed, because both of its false-positive families
+// are the ordinary copy of this market and only one of them is fixable:
+//
+//   TENURE. "99-year lease" and "99 years lease remaining" are how a leasehold
+//   listing is written, and a leasehold listing states its tenure as a WORD,
+//   so the source side could never ground them. Both refused, measured against
+//   a listing whose own tenure field said Leasehold. (An excludable case: a
+//   term over ~20 years is tenure, not a tenancy.)
+//
+//   THE MINIMUM TERM. "Minimum 1 year", "2 years contract", "12-month tenancy"
+//   is boilerplate on Malaysian rental ads, and a listing almost never writes
+//   the duration as a digit - "RM1,500 per month" carries no term at all. That
+//   IS the rule's entire remaining target, so it cannot be excluded: narrowing
+//   it to safety narrows it to nothing.
+//
+// And it read English only. "Kontrak 2 tahun" and "两年租约" passed unchecked
+// no matter what the listing said, so it refused honest English while letting
+// the same claim through in the two other languages this product writes in.
+// A guard that is one-third effective and refuses ordinary copy is worse than
+// no guard: a missed claim is recoverable, a silent refusal is not.
+//
+// KNOWN MISS, stated plainly: a caption that invents "2-year lease" against a
+// listing that names no term now publishes. The money on that same line
+// ("Deposit RM10,000") is still caught, by the money walk.
+
+// -- facilities --------------------------------------------------------------
+// A CLOSED list. Each entry is [what the caption claimed, how the caption says
+// it, what would ground it in the listing]. The grounds are deliberately wide -
+// any mention "of that sort", in any of the three languages, clears the claim.
+// "Security" is the one that needs care: "security deposit" is a rental term,
+// not a guard, so the claim pattern never matches the bare word.
+//
+// The GROUNDS are where this rule goes wrong, and the whole point of the
+// product is a caption written in a different language from the listing.
+// Measured 2026-09-04, all refused: a Malay listing saying "berpengawal" or
+// "kawalan keselamatan" against an English "gated and guarded", and "gimnasium"
+// or "gim" against "gym on site". `pengawal` was in the security grounds and
+// missing from both gated and guarded; `gim`/`gimnasium` were missing outright
+// while the grounds carried `kecergasan`, which no listing writes. Widening a
+// grounds list can only ever make this guard more permissive, so when in doubt
+// the word goes in.
+const FACILITY_CLAIMS = [
+  ['swimming pool', /\b(?:swimming\s*pool|infinity\s*pool|lap\s*pool|pool)\b|游泳池|泳池|kolam\s*renang/i, /pool|泳池|游泳|kolam/i],
+  ['gym', /\bgym(?:nasium)?\b|\bfitness\s*(?:centre|center|room|studio)\b|健身/i, /gym|gim\b|gimnasium|fitness|健身|kecergasan|senaman/i],
+  ['24-hour security', /\b24[\s-]?(?:hour|hr|jam)s?\s*(?:security|surveillance|cctv|guard)|\bsecurity\s*(?:guard|post|patrol|system|personnel)\b|round[\s-]the[\s-]clock\s*security|保安|pengawal\s*keselamatan|kawalan\s*keselamatan/i, /security|sekuriti|guard|cctv|保安|警卫|警衛|keselamatan|pengawal|pengawas|kawalan|berkawal|berpengawal|gated|门禁|門禁/i],
+  ['gated', /\bgated\b|门禁|門禁|berpagar/i, /gated|guarded|guard|门禁|門禁|berpagar|\bpagar\b|berkawal|berpengawal|kawalan|pengawal|sekuriti|保安|警卫|警衛|security|keselamatan/i],
+  ['guarded', /\bguarded\b/i, /guarded|gated|guard|保安|警卫|警衛|security|sekuriti|keselamatan|berpagar|\bpagar\b|berkawal|berpengawal|kawalan|pengawal/i],
+  ['playground', /\bplayground\b|\bchildren'?s?\s*play\s*area\b|游乐场|遊樂場|taman\s*permainan/i, /playground|play\s*area|游乐|遊樂|permainan/i],
+  ['clubhouse', /\bclub\s?house\b|会所|會所|rumah\s*kelab/i, /club\s?house|会所|會所|俱乐部|kelab/i],
+  ['lift', /\b(?:lift|elevator)\b|电梯|電梯|升降机|\blif\b/i, /lift|elevator|电梯|電梯|升降|\blif\b/i],
+  ['parking', /\bcar\s?park(?:ing)?\b|\bparking\b|车位|車位|停车|停車|tempat\s*letak\s*kereta/i, /car\s?park|parking|garage|porch|车位|車位|停车|停車|泊车|letak\s*kereta|parkir/i],
+]
+
+/**
+ * Returns { missing, invented, warnings } - the first two empty means the
+ * caption honours the listing. `warnings` are advisory ONLY and must never
+ * refuse a post; see the property-name note below. `listing` is the parsed
+ * listing incl. rawText.
  */
 export function captionViolations(caption, listing) {
   const cap = String(caption || '')
   const capLow = cap.toLowerCase()
   const src = `${listing?.rawText || ''}`
   const srcLow = src.toLowerCase()
-  const missing = [], invented = []
+  const missing = [], invented = [], warnings = []
 
   // -- MISSING ---------------------------------------------------------------
   // every distinct money amount the listing states (RM338,000 / RM1,300 / RM15,600 / RM100K)
@@ -360,8 +587,33 @@ export function captionViolations(caption, listing) {
   const HOOK_SRC = /below (?:bank )?value|below market|低于|市价|bawah nilai|harga pasaran/i
   const HOOK_CAP = /below (?:bank )?value|below market|save[sd]? rm|低于|市价|省下|优惠|bawah nilai|harga pasaran|jimat/i
   if (HOOK_SRC.test(src) && !HOOK_CAP.test(cap)) missing.push('the below-value hook')
-  for (const name of propertyNames(src, listing)) {
-    if (!capLow.includes(name.toLowerCase())) missing.push(`property name "${name}"`)
+
+  // THE PROPERTY NAME COMES FROM THE PARSER, NOT FROM CAPITALISATION.
+  //
+  // propertyNames() guesses a name by regexing capitalised runs out of the top
+  // of rawText, and in two days that produced three separate silent refusals -
+  // each one a good caption blocked with no error anyone saw:
+  //   2026-09-03  a one-line listing yielded "Sqft Fully Furnished" as a name
+  //   2026-09-03  "walking distance to Kuching City Mall" yielded "City Mall"
+  //   2026-09-04  "Call Jason" / "Hubungi Azlan" yielded "Jason" / "Azlan"
+  // Each was fixed as a symptom - another exclusion list, another rank tweak -
+  // and the next listing shape broke it again. The approach was the bug: a
+  // regex over capitalisation cannot tell a name from a landmark, and it can
+  // never return "this listing has no name", which is the correct answer for a
+  // room ad, a plot of land or an unnamed terrace.
+  //
+  // buildParsePrompt now asks the model for `propertyName`, which CAN be null.
+  // When the parser names the property, that name - and nothing else - is
+  // required. Otherwise the heuristic still runs, because it is right often
+  // enough to be worth telling the model about, but its guess is a WARNING and
+  // ingest.js may not refuse a post over it.
+  // A parser name is required ONLY when the listing text actually contains it -
+  // see resolvePropertyName(). Everything else is a warning ingest.js may not
+  // refuse over.
+  const { name: propName, from: nameFrom } = resolvePropertyName(listing)
+  if (propName && !carriesName(cap, propName)) {
+    if (nameFrom === 'parser') missing.push(`property name "${propName}"`)
+    else warnings.push(`possible property name "${propName}" (heuristic guess, not from the parser)`)
   }
 
   // -- INVENTED --------------------------------------------------------------
@@ -386,10 +638,38 @@ export function captionViolations(caption, listing) {
       invented.push(text)
     }
   }
+  // A YIELD the listing neither states nor implies. "Guaranteed 8% rental
+  // yield" published clean against a listing carrying no percentage at all;
+  // an investor buys on that number.
+  {
+    const knownY = knownYields(listing)
+    const seen = new Set()
+    for (const re of YIELD_CLAIM) {
+      for (const m of cap.matchAll(re)) {
+        const v = parseFloat(m[1])
+        if (!Number.isFinite(v) || yieldKnown(v, knownY)) continue
+        const text = `${v}% yield`
+        if (seen.has(text)) continue
+        seen.add(text)
+        invented.push(text)
+      }
+    }
+  }
+  // FACILITIES from the closed list above, where the listing mentions nothing
+  // of the sort. "Gated and guarded, 24-hour security, swimming pool, gym" is
+  // four promises about a building the agent described in one line.
+  // Skipped when the listing has no source text at all: `known` would be empty
+  // and every facility in the caption would read as invented. ingest.js always
+  // sets rawText, but nothing enforces that, and the failure would be silent.
+  if (srcLow.trim()) {
+    for (const [label, claim, grounds] of FACILITY_CLAIMS) {
+      if (claim.test(cap) && !grounds.test(known)) invented.push(label)
+    }
+  }
   // distances/amenities the listing never mentioned ("5 mins to X", "near Y")
   for (const m of cap.matchAll(/\b(\d+\s*min(?:ute)?s?\s+(?:to|from)\s+[^\n,.]{3,30})/gi)) {
     const place = m[1].toLowerCase().replace(/\s+/g, ' ')
     if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
   }
-  return { missing, invented }
+  return { missing, invented, warnings }
 }

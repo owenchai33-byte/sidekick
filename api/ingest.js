@@ -61,13 +61,14 @@ async function parseText(text, status) {
 
 // Native caption for the brand account: FB-page copy per requested language,
 // joined with a light divider (falls back to labelled demo copy without a key).
-// Returns { caption, degraded }. `degraded` means the model call FAILED and this is
+// Returns { caption, degraded, warnings }. `degraded` means the model call FAILED and this is
 // demo boilerplate, not the agent's real copy. It used to fall back silently, so a
 // Gemini 429 meant every agent posted generic demo text with nothing to indicate it.
-// A missing caption is obvious; a plausible wrong one is not.
+// A missing caption is obvious; a plausible wrong one is not. `warnings` are
+// advisory and never refuse anything - see the property-name note in postguard.js.
 async function writeCaption(listing, languages, status, styleGuide, contact, rules) {
   const langs = languages.length ? languages : ['en']
-  let content, degraded = false
+  let content, degraded = false, warnings = []
   if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
   else {
     try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules))) }
@@ -96,7 +97,8 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
 YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
 same JSON shape:
 ${v.missing.length ? `- MISSING (the listing states these; include every one): ${v.missing.join('; ')}` : ''}
-${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}`)
+${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}
+${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}`)
         const repaired = extractJson(fix)
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
@@ -117,20 +119,33 @@ ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.
       // more prompt text just moves it (annual rental 3/6 -> 6/6, name 6/6 ->
       // 4/6), so these are refused rather than coaxed: a caption the model will
       // not complete after two repair rounds does not get published.
-      const blocking = v.missing.filter((m) => /^RM|hook|property name/i.test(m))
+      //
+      // "property name" reaches v.missing ONLY when the parser named the
+      // property (listing.propertyName). A name the capitalisation heuristic
+      // guessed arrives in v.warnings instead and can never appear here, because
+      // that guess refused three good captions in two days - "Sqft Fully
+      // Furnished", "City Mall" off a landmark line, and "Jason" off "Call
+      // Jason" - each time silently, with the agent's post simply never going
+      // out. A guess may warn. Only the parser may refuse.
+      // Anchored. `^` bound only to the RM alternative, so ANY missing entry
+      // containing the word "hook" or "property name" anywhere blocked - and
+      // this filter is the one thing standing between a bad name and a
+      // permanent refusal, so it does not get to match loosely.
+      const blocking = v.missing.filter((m) => /^(?:RM|the below-value hook|property name)\b/i.test(m))
       if (v.invented.length || blocking.length || v.missing.length > 1) {
-        return { caption, degraded: true,
+        return { caption, degraded: true, warnings: v.warnings,
           reason: `caption breaks the listing contract - ${[...v.invented.map((x)=>`invented "${x}"`), ...v.missing.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
       }
     }
+    warnings = v.warnings
   }
   // A caption that invents a price cut is WORSE than a missing one: it is a
   // misleading claim about a client's property, published under their name.
   // Treat it exactly like a failed generation so the publish gate refuses it.
   if (!degraded && inventsPriceHistory(caption, listing)) {
-    return { caption, degraded: true, reason: 'invented a price reduction the listing never mentioned' }
+    return { caption, degraded: true, warnings, reason: 'invented a price reduction the listing never mentioned' }
   }
-  return { caption, degraded }
+  return { caption, degraded, warnings }
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
@@ -314,7 +329,9 @@ export default async function handler(req, res) {
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
-  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
+  // `captionWarnings` are advisory and NEVER block: today they carry the
+  // heuristic property-name guess, which used to refuse the post outright.
+  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [] } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
@@ -383,6 +400,7 @@ export default async function handler(req, res) {
       caption, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
       styleApplied, brandApplied, profileId: postProfile, captionDegraded,
+      ...(captionWarnings.length ? { captionWarnings } : {}),
       ...(captionDegraded ? { captionWarning: 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
       ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
       ...(cardError ? { cardError } : {}), meta,
