@@ -20,9 +20,18 @@ export default async function handler(req, res) {
   const status = providerStatus()
   const posting = providerConfigured()
 
-  let accounts = []
+  // null means UNKNOWN, and it is not the same as zero.
+  //
+  // This asked for the default profile's accounts and swallowed the error. When
+  // POSTPEER_PROFILE_ID is unset - which it is, deliberately, because
+  // _lib/social.js documents that there is no safe default for a multi-tenant
+  // account - the call throws, `accounts` stayed empty, and the home screen
+  // rendered a red "No accounts — connect" over an account with Facebook,
+  // Instagram and TikTok all live. Owner-facing, wrong, and the first thing
+  // anyone opening the app sees.
+  let accounts = null
   if (posting.configured) {
-    try { accounts = await connectedAccounts(defaultProfile()) } catch { /* leave accounts empty */ }
+    try { accounts = await connectedAccounts(defaultProfile()) } catch { accounts = null }
   }
 
   const [posts, pending] = await Promise.all([readFeed(30), listPending(20)])
@@ -33,8 +42,8 @@ export default async function handler(req, res) {
       postingProvider: posting.provider,
       postingKey: posting.configured,
       zernioKey: posting.configured, // kept for the existing UI field name
-      connectedAccounts: accounts.length,
-      platforms: accounts.map((a) => a.platform),
+      connectedAccounts: accounts ? accounts.length : null,
+      platforms: accounts ? accounts.map((a) => a.platform) : [],
     },
     pending: pending.map((p) => ({
       id: p.id, at: p.at, location: p.location, price: p.price, listingType: p.listingType,

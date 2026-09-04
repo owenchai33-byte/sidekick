@@ -31,7 +31,11 @@ export default function FeedPage() {
   const status = data?.status
   const posts = data?.posts || []
   const pending = data?.pending || []
-  const accountsOn = (status?.connectedAccounts || 0) > 0
+  // null = the app could not tell (no default profile configured), which is not
+  // the same as none connected. Saying "No accounts" there told the owner their
+  // live accounts were missing.
+  const accountsKnown = typeof status?.connectedAccounts === 'number'
+  const accountsOn = accountsKnown && status.connectedAccounts > 0
   const live = !!status?.providerConfigured
 
   const card = (p, i, isPending) => (
@@ -66,7 +70,7 @@ export default function FeedPage() {
       <div className="feed-status">
         <Link to="/settings" className={`fs-pill ${accountsOn ? 'ok' : 'warn'}`}>
           <span className="fs-dot" />
-          {accountsOn ? `${status.connectedAccounts} account${status.connectedAccounts > 1 ? 's' : ''} connected` : 'No accounts — connect'}
+          {accountsOn ? `${status.connectedAccounts} account${status.connectedAccounts > 1 ? 's' : ''} connected` : accountsKnown ? 'No accounts — connect' : 'Accounts live per agent'}
         </Link>
         <span className={`fs-pill ${live ? 'ok' : 'muted-pill'}`}>
           <span className="fs-dot" />
