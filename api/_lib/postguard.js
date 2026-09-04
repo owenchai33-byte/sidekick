@@ -762,6 +762,30 @@ export function captionViolations(caption, listing) {
 // silent refusal is the failure mode this project keeps paying for.
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F2FF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u
 
+// Named emoji an agent actually asks about. Only used to enforce a rule about
+// ONE emoji - it never widens into a blanket ban, which is the mistake that
+// flattened a real agent's captions.
+const EMOJI_BY_NAME = {
+  fire: '🔥', flame: '🔥',
+  heart: '❤️🧡💛💚💙💜🤍🖤❣️💕💖',
+  star: '⭐🌟✨',
+  money: '💰💵💸🤑',
+  house: '🏡🏠🏘️',
+  home: '🏡🏠',
+  rocket: '🚀',
+  siren: '🚨', alarm: '🚨',
+  party: '🎉🎊',
+  clap: '👏',
+  'thumbs up': '👍', thumb: '👍',
+  check: '✅☑️✔️', tick: '✅✔️',
+  car: '🚗🚙',
+  eyes: '👀',
+  bell: '🔔',
+  pin: '📍', location: '📍',
+  phone: '📲📱☎️',
+  sparkle: '✨', sparkles: '✨',
+}
+
 /**
  * Style-rule breaches in a caption, as plain sentences the repair prompt can
  * quote back. `rules` is the agent's own list; `platform` narrows the ones that
@@ -777,9 +801,37 @@ export function ruleViolations(caption, rules, platform = '') {
     const r = String(raw || '').toLowerCase()
     if (!r.trim()) continue
 
-    // no emoji
-    if (/\bno\b.*\bemoji|never.*\bemoji|without emoji|不要.*表情|jangan.*emoji/.test(r) && EMOJI.test(cap)) {
-      out.push(`they asked for no emoji — remove every emoji`)
+    // Emoji, and the distinction that matters: a BLANKET ban versus ONE emoji.
+    //
+    // The first version matched /never.*emoji/, so Edward's rule "never use the
+    // fire emoji" was read as "remove every emoji" and the repair round stripped
+    // every emoji out of a caption whose whole format is built on them. His
+    // posts went out as flat block capitals. Measured live 2026-09-04 - the
+    // rule enforcement shipped that morning and this was its first casualty.
+    //
+    // A blanket ban needs "emoji" to follow the negation directly ("no emoji",
+    // "never use emojis", "without any emoji"). Anything with a name in between
+    // is a rule about ONE emoji and is handled below.
+    const BLANKET_EMOJI = /\b(?:no|never use|never|without|avoid|don'?t use|do not use)\s+(?:any\s+|all\s+)?emojis?\b|不要(?:任何)?表情|jangan\s+(?:guna\s+)?emoji/i
+    if (BLANKET_EMOJI.test(r) && EMOJI.test(cap)) {
+      out.push(`they asked for no emoji at all — remove every emoji`)
+    } else {
+      // ONE named emoji. Only the named character is a breach; the rest of the
+      // agent's format stays exactly as they built it.
+      const named = r.match(/(?:no|never use|never|without|avoid|don'?t use|do not use)\s+(?:the\s+)?([a-z ]{2,18}?)\s+emojis?\b/)
+      if (named) {
+        const key = named[1].trim().replace(/\s+/g, ' ')
+        // Compare with the variation selector (U+FE0F) stripped from BOTH sides.
+        // Spreading '❤️' by code point yields '❤' AND the selector, and that
+        // selector also lives inside '‼️' - so a caption with no heart in it
+        // matched the heart rule on an invisible character.
+        const strip = (t) => String(t).replace(/\uFE0F/g, '')
+        const chars = EMOJI_BY_NAME[key]
+        const capBare = strip(cap)
+        if (chars && [...strip(chars)].some((ch) => ch.trim() && capBare.includes(ch))) {
+          out.push(`they asked you not to use the ${key} emoji — remove it (keep their other emoji)`)
+        }
+      }
     }
 
     // no hashtags, optionally scoped to a platform

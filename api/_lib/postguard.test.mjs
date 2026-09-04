@@ -1294,3 +1294,41 @@ describe('marketing language the listing never used', () => {
     expect(v.invented).toEqual([])
   })
 })
+
+// "Never use the fire emoji" is not "never use emoji".
+//
+// The rule enforcement shipped on the morning of 2026-09-04 and this was its
+// first casualty, live, on a real client's Facebook page. Edward's rule reads
+// "always put the area name in CAPS and never use the fire emoji". The check
+// matched /never.*emoji/, told the repair round "remove every emoji", and his
+// caption — whose entire format is built on ‼️ 🎉 📍 💰 ✅ 🚗 — went out as flat
+// block capitals with none of his voice left.
+//
+// A blanket ban needs "emoji" to follow the negation directly. A name in
+// between means one emoji, and only that one comes out.
+describe('emoji rules: a blanket ban versus one named emoji', () => {
+  const EDWARD = ['from now on always put the area name in CAPS and never use the fire emoji']
+  const CAP = '‼️ RARE 1-BEDROOM UNIT FOR SALE ‼️\n🎉 Tropics City 🎉\n📍 Tabuan Dayak\n💰 RM338,000'
+  const flagged = (cap, rules) => ruleViolations(cap, rules, 'facebook_page').some((x) => /emoji/i.test(x))
+
+  it('leaves the rest of an agent’s emoji alone when they banned only one', () => {
+    expect(flagged(CAP, EDWARD)).toBe(false)
+  })
+
+  it('still catches the one they actually named', () => {
+    expect(flagged(`${CAP}\n🔥 Gross Yield 4.62%`, EDWARD)).toBe(true)
+  })
+
+  it('a genuine blanket ban still removes everything', () => {
+    expect(flagged(CAP, ['Never use emoji in captions'])).toBe(true)
+    expect(flagged(CAP, ['No emojis please'])).toBe(true)
+    expect(flagged(CAP, ['without any emoji'])).toBe(true)
+  })
+
+  it('does not match a named emoji on an invisible variation selector', () => {
+    // ❤️ is a heart PLUS U+FE0F, and that same selector lives inside ‼️ — so
+    // comparing by code point flagged a heart rule on a caption with no heart.
+    expect(flagged(CAP, ['No heart emoji'])).toBe(false)
+    expect(flagged(`${CAP}\n❤️ Lovely home`, ['No heart emoji'])).toBe(true)
+  })
+})
