@@ -26,7 +26,13 @@ vi.mock('./providers.js', () => providers)
 vi.mock('./style.js', () => ({ getStyle: vi.fn(async () => ({})), getRules: vi.fn(async () => ({ rules: [] })) }))
 vi.mock('./brand.js', () => ({ getBrand: vi.fn(async () => ({})) }))
 vi.mock('./brandcard.js', () => ({ renderBrandCard: vi.fn(async () => Buffer.from('')) }))
-vi.mock('@vercel/blob', () => ({ put: vi.fn(async () => ({ url: 'https://blob.test/card.png' })) }))
+vi.mock('@vercel/blob', () => ({
+  put: vi.fn(async () => ({ url: 'https://blob.test/card.png' })),
+  list: vi.fn(async () => ({ blobs: [] })), del: vi.fn(async () => {}),
+}))
+// NOT mocked: the corpora below run the real demo-caption detector, because
+// what it does and does not see is half of why this flag has to exist.
+const { looksLikeDemoCaption } = await import('./postguard.js')
 
 const { default: holdHandler } = await import('../hold.js')
 const { default: approveHandler } = await import('../approve.js')
@@ -96,6 +102,17 @@ const MUST_PASS = [
   '古晋 BDC 排屋出售\nRM585,000，1,320 平方尺\n3 房 2 浴，已装修\n欢迎私讯看房\n#古晋房产 #砂拉越',
   'Just listed in Tabuan Jaya — RM735,000\n2,100 sq ft corner unit\nSolar installed, low electric bill\nDM for the full album\n#TabuanJaya #KuchingProperty #Sarawak',
   'Serviced apartment at The Park Residence, RM1,800 a month. Fully furnished, covered parking, gym and pool. Available from next month — message me to book a viewing.',
+  // Price shapes an agent actually types. The parse-side corpus that scored
+  // 2/12 fell over on exactly these: "450k nego" and "1.25 juta" are prices,
+  // not inventions, and a caption carrying them is a good caption.
+  'Land at Matang — 450k nego. Freehold, road frontage, mixed zone. Serious buyers only, call 019-777 4455. #KuchingLand #Sarawak',
+  'SEMI-D DI GREEN HEIGHTS — 1.25 juta. 5 BILIK TIDUR, 4 BILIK AIR, LOT TEPI. HUBUNGI 012-345 6789 UNTUK LAWATAN. #HartanahKuching',
+  'Whole unit at Jalan Song for rent, RM2.5k/month. 3 rooms, fully furnished, covered parking. Single rooms also available from RM650. WhatsApp me.',
+  '古晋 BDC 排屋出售，售价 430,000。3 房 2 厕，1,320 平方尺，永久地契。欢迎私讯安排看房。#古晋房产',
+  'Master room for rent at Vivacity — RM800 a month. Attached bathroom, aircond, wifi and cleaning included. Female tenant preferred. DM me.',
+  // The exact one-liner the reverted shape-detector refused on 2026-09-03.
+  // It is a real TikTok title. If anything ever refuses this again, this fails.
+  'Studio in Kuching — RM650 a month',
 ]
 
 // The specific bad output being targeted: the deterministic template at
@@ -211,5 +228,194 @@ describe('ingest(reel) marks its own fallback', () => {
     expect(res.statusCode).toBe(200)
     expect(res.body.captionDegraded).toBe(false)
     expect(res.body.captionWarning).toBeUndefined()
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// THE EVIDENCE. The flag is set where the fallback is CHOSEN, so the two corpora
+// below are separated by provenance, not by wording — which is the whole point.
+// The reverted version guessed from text in hold.js and refused 7 of 8 real
+// short captions; MUST-PASS is what stops that coming back.
+// ---------------------------------------------------------------------------
+
+// Real WhatsApp reel messages, each paired with the caption ingest.js's
+// deterministic template actually produces for it. The strings were captured
+// from the code under test, not written by hand: if the template drifts, these
+// fail, and the flag would then be describing something else.
+const FALLBACK = [
+  ['For rent in Kuching, RM1,300 per month, 3 rooms',
+   'Property in Kuching — RM1,300 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Apartment at Batu Kawa for sale RM480,000, 3 bed 2 bath',
+   'Apartment in Batu Kawa — RM480,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Terrace in Kota Samarahan, 620,000 nego, 4 bed 3 bath',
+   'Terrace in Kota Samarahan  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Semi-D at Green Heights, 1.25 juta, 5 bed 4 bath',
+   'Semi-D in Green Heights — RM1,250,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Condo in Petra Jaya for rent RM2.1k/month, 2 rooms',
+   'Condo in Petra Jaya — RM2,100 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Land at Matang, 450k nego, freehold',
+   'Land in Matang — RM450,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['古晋 BDC 排屋出售 售价 430,000, 3 房 2 厕',
+   'Property in Kuching  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Rumah teres di Samarahan, RM520,000, 4 bilik 3 tandas',
+   'Property in Kuching — RM520,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['SHOPLOT AT STUTONG BARU FOR RENT RM3,500/MO, 22FT FRONTAGE',
+   'Shoplot in Kuching — RM3,500 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['Detached house at Tabuan Jaya, 5 bed 4 bath, price on ask',
+   'Detached in Tabuan Jaya  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ['New listing at Jalan Song\nApartment for sale\nRM390,000\n3 bed 2 bath, 900 sqft',
+   'Apartment in Jalan Song\nApartment — RM390,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+]
+
+const reelBodyFor = (text) => ({ mode: 'reel', profileId: 'p1', text, images: ['https://cdn.test/photo1.jpg'] })
+
+/** Forward what ingest(reel) returned to /api/hold, the way the Mac must. */
+const holdReel = (reel) => hold({
+  caption: reel.body.caption, script: reel.body.script, mediaItems: MEDIA, profileId: 'p1',
+  captionDegraded: reel.body.captionDegraded, captionDegradedReason: reel.body.captionDegradedReason,
+})
+
+describe('MUST-CATCH: the fallback is flagged where it is generated', () => {
+  it.each(FALLBACK.map(([t, c], i) => [i, t, c]))(
+    'MUST-CATCH #%i — the model dies (429), the template is flagged and the ✅ refuses it',
+    async (_i, text, expected) => {
+      // The live shape of the 2026-09-03 incident: a provider IS configured and
+      // the call fails, so status.configured tells you nothing about the output.
+      providers.providerStatus.mockReturnValue({ configured: true, provider: 'gemini' })
+      providers.runModel.mockRejectedValue(new Error('429 quota exceeded'))
+
+      const reel = await ingest(reelBodyFor(text))
+      expect(reel.body.caption).toBe(expected)          // this IS the template
+      expect(reel.body.captionDegraded).toBe(true)
+      expect(reel.body.captionDegradedReason).toMatch(/template/i)
+      // Why a flag was needed at all: the detector already in the tree sees
+      // nothing wrong with any of these — its markers describe demoContent(),
+      // which the reel path never calls.
+      expect(looksLikeDemoCaption(reel.body.caption)).toBe(false)
+      expect(looksLikeDemoCaption(reel.body.script)).toBe(false)
+
+      await holdReel(reel)
+      expect(heldRecord().captionDegraded).toBe(true)
+      expect(heldRecord().captionDegradedReason).toMatch(/template/i)
+
+      pending.getPending.mockResolvedValue(heldRecord())
+      const a = await approve({ id: 'e5f48cc5', decision: 'approve' })
+      expect(a.statusCode).toBe(409)
+      expect(a.body.blocked).toBe('captionDegraded')
+      expect(social.postToConnected).not.toHaveBeenCalled()  // nothing reached TikTok
+    })
+
+  it.each(FALLBACK.map(([t], i) => [i, t]))(
+    'MUST-CATCH #%i — with no provider at all, same template, same refusal',
+    async (_i, text) => {
+      providers.providerStatus.mockReturnValue({ configured: false, provider: null })
+      const reel = await ingest(reelBodyFor(text))
+      expect(reel.body.captionDegraded).toBe(true)
+      expect(reel.body.captionDegradedReason).toMatch(/no AI provider/i)
+      await holdReel(reel)
+      pending.getPending.mockResolvedValue(heldRecord())
+      expect((await approve({ id: 'e5f48cc5', decision: 'approve' })).statusCode).toBe(409)
+    })
+})
+
+describe('MUST-PASS: a model-written reel is never flagged', () => {
+  it.each(FALLBACK.map(([t], i) => [i, t]))(
+    'MUST-PASS reel #%i — the model answered, so it holds clean and publishes',
+    async (_i, text) => {
+      providers.providerStatus.mockReturnValue({ configured: true, provider: 'groq' })
+      providers.runModel.mockResolvedValue('{}')
+      // First extractJson is the listing parse, every later one is the reel.
+      providers.extractJson
+        .mockReturnValueOnce({ listingType: 'sale', price: 498000, location: 'Kuching', propertyType: 'Terrace', bedrooms: 3, bathrooms: 2 })
+        .mockReturnValue({ script: MUST_PASS[10], caption: MUST_PASS[2] })
+
+      const reel = await ingest(reelBodyFor(text))
+      expect(reel.body.captionDegraded).toBe(false)
+      expect(reel.body.captionDegradedReason).toBeUndefined()
+      expect(reel.body.captionWarning).toBeUndefined()
+
+      await holdReel(reel)
+      expect(heldRecord().captionDegraded).toBe(false)
+      expect(heldRecord().captionDegradedReason).toBe(null)
+
+      pending.getPending.mockResolvedValue(heldRecord())
+      const a = await approve({ id: 'e5f48cc5', decision: 'approve' })
+      expect(a.statusCode).toBe(200)
+      expect(social.postToConnected).toHaveBeenCalled()
+    })
+})
+
+describe('MUST-PASS: real captions still reach the page', () => {
+  it.each(MUST_PASS.map((c, i) => [i, c]))(
+    'MUST-PASS #%i holds clean and the ✅ publishes it',
+    async (_i, caption) => {
+      expect(looksLikeDemoCaption(caption)).toBe(false)
+      await hold({ caption, mediaItems: MEDIA, profileId: 'p1' })
+      expect(heldRecord().captionDegraded).toBe(false)
+      pending.getPending.mockResolvedValue(heldRecord())
+      const res = await approve({ id: 'ok-1', decision: 'approve' })
+      expect(res.statusCode).toBe(200)
+      expect(social.postToConnected).toHaveBeenCalled()
+    })
+})
+
+describe('provenance decides, not shape', () => {
+  // Two captions one word apart. The refusal has to come from knowing which one
+  // the model wrote, because no reading of the text can tell them apart — the
+  // detector that tried scored 1 of 8 on captions like the first.
+  it('the agent\'s own short title publishes; the template with the same shape does not', async () => {
+    await hold({ caption: 'Studio in Kuching — RM650 a month', mediaItems: MEDIA, profileId: 'p1' })
+    pending.getPending.mockResolvedValue(heldRecord())
+    expect((await approve({ id: 'a', decision: 'approve' })).statusCode).toBe(200)
+
+    providers.providerStatus.mockReturnValue({ configured: true, provider: 'gemini' })
+    providers.runModel.mockRejectedValue(new Error('429 quota exceeded'))
+    const reel = await ingest(reelBodyFor('For rent in Kuching, RM1,300 per month, 3 rooms'))
+    await holdReel(reel)
+    pending.getPending.mockResolvedValue(heldRecord())
+    const blocked = await approve({ id: 'b', decision: 'approve' })
+    expect(blocked.statusCode).toBe(409)
+    expect(blocked.body.blocked).toBe('captionDegraded')
+  })
+})
+
+// The repair must never swap the agent's real copy for the template.
+//
+// The reel path runs one repair round when captionViolations finds an invention,
+// and accepted the retry whenever it had FEWER inventions. The deterministic
+// fallback has zero by construction — so a retry that hit a rate limit and fell
+// back replaced a perfectly good caption with "Condo in Kuching — RM498,000" and
+// flagged it degraded, which is a 409 at the tick. Silent, total, on the good
+// path. Measured 2026-09-04. The guard is `!retry.degraded`.
+describe('the reel repair keeps the good copy', () => {
+  const GOOD = {
+    script: 'Riveria Residence in Kuching. Four ninety eight thousand. Three bed, two bath.',
+    caption: 'Riveria Residence, Kuching — RM498,000. 3 bed 2 bath, 1,100 sq ft.',
+    degraded: false,
+  }
+  const FELL_BACK = {
+    script: 'Trust me, it won\'t last long. DM me now before it\'s gone.',
+    caption: 'Condo in Kuching — RM498,000 🏡 #KuchingProperty',
+    degraded: true,
+  }
+
+  it('rejects a retry that fell back, even though it has fewer inventions', () => {
+    // This is the arithmetic the bug turned on: the fallback scores better on
+    // the only measure the old condition looked at.
+    const inventionsIn = (r) => (r === GOOD ? 1 : 0)
+    const accept = (retry, before, after) => !retry.degraded && after < before
+    expect(accept(FELL_BACK, inventionsIn(GOOD), inventionsIn(FELL_BACK))).toBe(false)
+  })
+
+  it('still accepts a clean retry that genuinely fixed the invention', () => {
+    const CLEANED = { ...GOOD, caption: GOOD.caption.replace('1,100 sq ft', '1,100 sq ft'), degraded: false }
+    const accept = (retry, before, after) => !retry.degraded && after < before
+    expect(accept(CLEANED, 2, 0)).toBe(true)
+  })
+
+  it('the guard is present in the source, not just in this test', async () => {
+    const src = await import('node:fs').then((fs) => fs.readFileSync('api/ingest.js', 'utf8'))
+    expect(src).toMatch(/if \(!retry\.degraded && rv2\.invented\.length < rv\.invented\.length\)/)
   })
 })

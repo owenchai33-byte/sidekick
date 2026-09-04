@@ -274,13 +274,22 @@ export default async function handler(req, res) {
         const retry = await reelScript(listing, status, reelStyle,
           [...(reelRules || []), `NEVER say any of these - the listing does not support them: ${rv.invented.join('; ')}`])
         const rv2 = captionViolations(`${retry.script || ''}\n${retry.caption || ''}`, listing)
-        if (rv2.invented.length < rv.invented.length) rs = retry
+        // `!retry.degraded` matters as much as the count. A retry that fell back
+        // returns the deterministic template, which has ZERO inventions by
+        // construction - so without this the repair swaps the agent's real copy
+        // for the template whenever the retry hits a rate limit, and flags the
+        // result degraded. Measured 2026-09-04: a good Riveria Residence caption
+        // became "Condo in Kuching - RM498,000" and was refused at the tick.
+        if (!retry.degraded && rv2.invented.length < rv.invented.length) rs = retry
       }
     }
     // Hand the flag to the caller so it can pass it straight to /api/hold. Not a
     // refusal here: the Mac still gets its script, and the ✅ is where a template
-    // is stopped — /api/hold also recognises this template on its own, because the
-    // reel caller lives outside this repo and may not forward the flag yet.
+    // is stopped. This flag is the ONLY signal — /api/hold deliberately does not
+    // sniff the text, because the version that tried refused 7 of 8 realistic
+    // short captions ("Studio in Kuching — RM650 a month" is a real TikTok title,
+    // not a template). A caller that drops captionDegraded gets a clean-looking
+    // pending, so the reel caller must forward it.
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
       captionDegraded: !!rs.degraded,

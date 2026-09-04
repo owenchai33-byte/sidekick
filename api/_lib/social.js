@@ -158,6 +158,50 @@ export async function disconnect(accountId) {
   return true
 }
 
+// Releasing the dedupe claim is only safe when the provider has told us the post
+// is TERMINALLY dead, and only the PER-PLATFORM status says that.
+//
+// Measured 2026-09-04: releasing on our own `!posted.length` published the whole
+// set twice, because that branch also catches a post PostPeer accepted and is
+// still uploading — the poll loop gives up after 6 x 2s and the entry then reads
+// "facebook: pending". So the test is the platform's own word for its state.
+// 'failed' is the one this codebase has actually seen (the poll loop and the
+// caller both key on it); 'error' and 'rejected' are accepted alongside it
+// because no provider uses either for work still in flight. Everything else —
+// 'pending', 'publishing', 'processing', no status at all, or a bare
+// success:false with no status — is UNKNOWN, and unknown means possibly live.
+const TERMINAL_FAIL = /^(failed|error|rejected)$/i
+// `success === false` is the field PostPeer actually documents per platform (see
+// the response shape this file already parses: success, errorMessage,
+// platformPostUrl); `status` is the newer, less certain one. A first version
+// keyed ONLY on status, so the very incident this release exists for - the tick
+// pressed with an expired Facebook token, which answers success:false with an
+// errorMessage and no per-platform status - still came back duplicate on retry.
+// An explicit false, or a terminal status word, both mean dead. Anything else -
+// including a missing field - is unknown and keeps the claim.
+const platformDead = (p) =>
+  p?.success === false || TERMINAL_FAIL.test(String(p?.status || '').trim())
+
+/**
+ * True only when EVERY platform we asked for came back terminally failed, so
+ * nothing is live and a retry cannot duplicate anything. A platform missing from
+ * the response is unknown, not failed — one silent platform keeps the claim.
+ */
+function nothingIsLive(targets, plats) {
+  if (!plats.length) return false
+  if (!plats.every(platformDead)) return false
+  const reported = new Set(plats.map((x) => x.platform))
+  return targets.every((t) => reported.has(t.platform))
+}
+
+// A 4xx from PostPeer is a refusal: bad body, bad key, no permission,
+// unprocessable — the request was never accepted, so the claim must not stand or
+// the agent's fixed retry is swallowed as a duplicate. 5xx is NOT on this list:
+// a 502/504 from a gateway in front of PostPeer cannot be told apart from
+// "processed, response lost". Nor are 408 and 429, which can both arrive after
+// the post was already queued.
+const REJECTED_OUTRIGHT = new Set([400, 401, 403, 422])
+
 /**
  * Publish caption + media to every connected account on a profile.
  *
@@ -231,13 +275,10 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
         body: JSON.stringify({ content: caption, mediaItems, platforms: targets, publishNow: true }),
       })
       const t = await r.text().catch(() => '')
-      // The claim deliberately STAYS. A 400 or 401 really does mean nothing was
-      // accepted, but a 502/504 from a gateway in front of PostPeer means the
-      // request may have been processed and only the response lost - and
-      // releasing on that lets a retry double-post to a client's public page.
-      // We cannot tell the two apart from here, and a silent ten-minute refusal
-      // is the lesser harm.
+      // Outright rejection releases the claim; an ambiguous 5xx keeps it. See
+      // REJECTED_OUTRIGHT above for which is which and why.
       if (!r.ok) {
+        if (REJECTED_OUTRIGHT.has(r.status)) await releasePostOnce(fp)
         return { ok: false, error: `PostPeer ${r.status} ${t.slice(0, 200)}` }
       }
 
@@ -275,14 +316,14 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
 
       // No per-platform detail came back — stay optimistic but say which state we saw.
       if (!plats.length) return { ok: true, platforms: targets.map((p) => p.platform), postId: d.postId, status }
-      // The claim STAYS here too, and the branch name is the trap: `!posted.length`
-      // is NOT "every platform failed". `ok2` counts only status 'published', and
-      // the poll loop above gives up after 6 x 2s - so a post PostPeer accepted
-      // and is still uploading (a TikTok reel, every time) lands here with an
-      // error that literally reads "facebook: pending". Releasing on that let a
-      // retry publish the whole set a second time; measured 2026-09-04, two
-      // publish calls where there should have been one.
+      // The branch name is the trap: `!posted.length` is NOT "every platform
+      // failed" (see nothingIsLive above), so the claim is released only when
+      // every target platform said so itself. Confirmed 2026-09-03, the cost of
+      // keeping it wrongly: the human taps the tick, approve.js answers
+      // retryable:true, the agent retries, the retry comes back duplicate:true
+      // and the agent reports a post that never happened.
       if (!posted.length) {
+        if (nothingIsLive(targets, plats)) await releasePostOnce(fp)
         return { ok: false, error: failed.join(' | ') || `PostPeer status ${status}`, postId: d.postId }
       }
       // PARTIAL is the opposite case and the claim STAYS. Some platforms are

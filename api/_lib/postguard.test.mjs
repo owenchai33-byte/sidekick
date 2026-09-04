@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames } from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts } from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -183,6 +183,117 @@ Lister: Edward 0183929100` }
   })
 })
 
+// Invented numbers: room counts and money.
+//
+// All four of these published clean on 2026-09-03 against a 2-bed/2-bath
+// listing. The first three are what this pass adds; the yield is deliberately
+// still out of scope (see the report in postguard.js) - a yield claim needs a
+// caption-to-listing walk, and every extra rule is another chance to refuse a
+// good caption.
+describe('invented numbers', () => {
+  const twoBed = {
+    listingType: 'sale', price: 338000, location: 'Tabuan Dayak', bedrooms: 2, bathrooms: 2, sqft: 800,
+    rawText: `Tropics City - 2 Bedroom Unit For Sale
+Location : Tabuan Dayak
+Selling Price : RM338,000 (RM100K Below Value)
+800 sqft, 2 Bedroom, 2 Bathroom, 1 Carpark
+Lister: Edward 0183929100`,
+  }
+  const base = 'Tropics City, Tabuan Dayak. RM338,000 - RM100K below value. 800 sqft. Edward 0183929100'
+
+  it('catches a room count that contradicts the listing', () => {
+    const v = captionViolations(`${base} 4 bedrooms and 3 bathrooms.`, twoBed)
+    expect(v.invented.some((x) => /4 bedrooms/.test(x))).toBe(true)
+    expect(v.invented.some((x) => /3 bathrooms/.test(x))).toBe(true)
+  })
+
+  it('says nothing when the listing never stated a room count', () => {
+    const noCounts = { ...twoBed, bedrooms: null, bathrooms: undefined }
+    expect(captionViolations(`${base} 4 bedrooms and 3 bathrooms.`, noCounts).invented).toEqual([])
+  })
+
+  it('trusts the source over a parser slip', () => {
+    // if the LISTING itself says 4 bedrooms, a caption repeating it is faithful,
+    // whatever the parser put in the field.
+    const slipped = { ...twoBed, bedrooms: 2, rawText: `${twoBed.rawText}\n4 bedrooms upstairs` }
+    expect(captionViolations(`${base} 4 bedrooms.`, slipped).invented).toEqual([])
+  })
+
+  it('catches a money figure the listing cannot justify', () => {
+    expect(captionViolations(`${base} 2 Bedroom 2 Bathroom. Deposit RM10,000.`, twoBed).invented)
+      .toContain('RM10,000')
+  })
+
+  // THE REVERT, as a test. A listing written "450k nego" has no "RM" in it at
+  // all; an RM-only scan of rawText produced an empty set, so prompts.js told
+  // the model "Asking price: RM450,000", the guard called that an invention, and
+  // the repair loop had the model delete the price. The advert then published
+  // with no price and no violation.
+  it('never calls the agent\'s own asking price an invention', () => {
+    const nego = {
+      listingType: 'sale', price: 450000, location: 'Batu Kawa', bedrooms: 3, bathrooms: 2, sqft: 1400,
+      rawText: 'Double storey terrace Batu Kawa for sale. 450k nego. 3 bed 2 bath, 1400 sqft built-up. call 0128887766',
+    }
+    const v = captionViolations('Double Storey Terrace @ Batu Kawa\nRM450,000 (nego)\n3 Bed | 2 Bath | 1,400 sqft\n0128887766', nego)
+    expect(v.invented).toEqual([])
+    expect(knownAmounts(nego)).toContain(450000)
+  })
+
+  it('allows the figures a caption legitimately computes', () => {
+    const rental = {
+      listingType: 'rental', price: 2500, location: 'Vivacity', bedrooms: 2, bathrooms: 2, sqft: 850,
+      rawText: 'Vivacity for rent RM2,500/month, 2 bed 2 bath, 850 sqft. call 0122223333',
+    }
+    // annual = 2500 x 12; psf = 2500/850 = 2.94, quoted rounded
+    const v = captionViolations('Vivacity RM2,500/month (RM30,000 a year, about RM3 psf). 2 bed 2 bath, 850 sqft. 0122223333', rental)
+    expect(v.invented).toEqual([])
+  })
+
+  it('reads every price notation the parser accepts', () => {
+    const juta = { price: 1250000, rawText: 'Land for sale, 1.25 juta, 21,780 sq ft. call 0111234567' }
+    expect(captionViolations('Land for sale RM1,250,000 — 21,780 sq ft. 0111234567', juta).invented).toEqual([])
+    const k = { price: 288000, rawText: 'Terrace for sale 288k nego. call 0175552222' }
+    expect(captionViolations('Terrace RM288k nego. 0175552222', k).invented).toEqual([])
+  })
+
+  it('does not read the word "form" as an RM amount', () => {
+    const l = { price: 338000, bedrooms: 2, bathrooms: 2, rawText: 'Apartment for sale RM338,000, 2 bed 2 bath. call 0183929100' }
+    expect(captionViolations('RM338,000. 2 bed 2 bath. Fill in the form 3 and confirm 2 slots. 0183929100', l).invented).toEqual([])
+  })
+
+  it('checks nothing when there is nothing to check against', () => {
+    // no source text and no parsed price: every figure would look invented, and
+    // the caption would be refused for carrying a price at all.
+    expect(captionViolations('A lovely home, RM450,000.', {}).invented).toEqual([])
+  })
+})
+
+describe('price-cut phrasings', () => {
+  const listing = { rawText: 'RARE 1-BEDROOM FOR SALE. Tropics City. RM338,000 (RM100k below value).' }
+
+  for (const cap of [
+    'Originally RM438,000 — yours for RM338,000',
+    'Down from RM438,000. Now RM338,000',
+    'Price slashed! RM338,000',
+    'Reduced by RM100,000 — RM338,000',
+    'RM100,000 off the asking price',
+    'Was RM438,000, now RM338,000',
+  ]) {
+    it(`catches "${cap.slice(0, 28)}..."`, () => {
+      expect(inventsPriceHistory(cap, listing)).toBe(true)
+    })
+  }
+
+  it('still allows the honest below-bank-value caption', () => {
+    expect(inventsPriceHistory('RM338,000 — RM100k below bank value. Save RM100,000.', listing)).toBe(false)
+  })
+
+  it('still allows a listing the agent really did reduce', () => {
+    const reduced = { rawText: 'Originally RM438,000, reduced to RM338,000 for a quick sale.' }
+    expect(inventsPriceHistory('Down from RM438,000 — now RM338,000', reduced)).toBe(false)
+  })
+})
+
 describe('per-agent rule isolation', () => {
   it('one agent\'s rules can never reach another agent (separate profile keys)', async () => {
     // rules/<profileId>.json — the key IS the isolation. This test exists
@@ -278,5 +389,47 @@ describe('property name extraction across real listing shapes', () => {
     }
     const caption = 'RENNA RESIDENCE — The Northbank Kuching\nRM2,500/month (nego)\n2 Bed 2 Bath | 787 Sqft | 12th Floor | Fully Furnished\nLydia 0143998011'
     expect(captionViolations(caption, listing)).toEqual({ missing: [], invented: [] })
+  })
+})
+
+// Chinese listings, which are a large share of this market.
+//
+// The money regexes ended with \b, which is defined on [A-Za-z0-9_]. 万 and 萬
+// are not word characters, so the boundary only held when an ASCII character
+// happened to follow — "RM43万 3房" matched "RM43" and dropped the 万, turning
+// 430,000 into 43. The caption's own asking price then looked invented, and the
+// repair loop told the model to delete it. ASCII multipliers keep their
+// boundary so "form 3 bedrooms" is not read as "rm 3"; CJK ones need none.
+describe('money written in Chinese', () => {
+  const listing = {
+    listingType: 'sale', price: 430000, location: '石角', bedrooms: 3, bathrooms: 2, sqft: 1300,
+    rawText: '石角排屋出售\n售价43万（低于市价10万）\n3房2厕 1300平方尺\n联络 0165554444',
+  }
+
+  it('accepts a caption that writes the price in 万', () => {
+    const cap = '石角排屋出售 RM43万（低于市价RM10万）3房2厕 1300平方尺 联络 0165554444'
+    expect(captionViolations(cap, listing).invented).toEqual([])
+  })
+
+  it('accepts the same caption written in full figures', () => {
+    const cap = '石角排屋出售 RM430,000（低于市价 RM100,000）3房2厕 1300平方尺 联络 0165554444'
+    expect(captionViolations(cap, listing).invented).toEqual([])
+  })
+
+  it('does not call the asking price an invention when the listing has no parsed price', () => {
+    // The worst version of this bug: with price null the known set was empty and
+    // the guard flagged the only price the listing has.
+    const cap = '石角排屋出售 RM430,000 3房2厕 联络 0165554444'
+    expect(captionViolations(cap, { ...listing, price: null }).invented).toEqual([])
+  })
+
+  it('still refuses a figure that is in neither the listing nor derivable from it', () => {
+    const cap = '石角排屋出售 RM43万 3房2厕 押金 RM50,000 联络 0165554444'
+    expect(captionViolations(cap, listing).invented.join(' ')).toMatch(/50,?000/)
+  })
+
+  it('does not read "form" as an RM amount', () => {
+    const l = { listingType: 'sale', price: 338000, bedrooms: 3, rawText: 'Terrace RM338,000 3 bed' }
+    expect(captionViolations('Terrace RM338,000, 3 bed. Fill in the form 3 times.', l).invented).toEqual([])
   })
 })

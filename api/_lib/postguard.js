@@ -99,7 +99,11 @@ export function looksLikeDemoCaption(caption) {
 // A prompt rule did not stop it — this is the enforcement. Anything that claims
 // a reduction the listing never mentioned is treated as a degraded caption, and
 // the existing publish gate then refuses it.
-const REDUCTION_CLAIM = /\b(now only|was rm|reduced from|price\s*(reduced|reduction|drop|dropped|slashed|cut))\b/i
+// Two halves, because the trailing \b is what made the original "was rm" dead
+// letter: in "Was RM438,000" the character after "rm" is a digit, so there is no
+// word boundary there and the alternative never fired. The rm-prefixed phrasings
+// therefore end at "rm" with nothing after them.
+const REDUCTION_CLAIM = /\b(?:now only|reduced from|reduced by|slashed|off the asking price|price\s*(?:reduced|reduction|drop|dropped|slashed|cut))\b|\b(?:was|down from|originally|previously)\s*(?:priced\s*at\s*)?rm/i
 
 /**
  * True when the caption claims a price cut the source listing never made.
@@ -191,6 +195,134 @@ export function propertyNames(rawText, listing) {
   return scored.filter((x) => x.score === best).map((x) => x.n)
 }
 
+// Invented NUMBERS.
+//
+// The guard read every material claim except the two a buyer actually acts on:
+// how many rooms, and how much money. Verified 2026-09-03 against a 2-bed/2-bath
+// listing, these all published clean: "4 bedrooms and 3 bathrooms", "Deposit
+// RM10,000", "Originally RM438,000 - yours for RM338,000".
+//
+// The first attempt at the money half was reverted the same day, and the reason
+// is the whole design of what follows. It built its set of known amounts by
+// regexing "RM" out of rawText alone. A listing written "450k nego" carries no
+// "RM" at all, so the set came back empty while the parser had already produced
+// price = 450000 and prompts.js had already told the model "Asking price:
+// RM450,000". The model obeyed, and the guard called the agent's own asking
+// price an invention - after which the repair loop in ingest.js instructed it to
+// DELETE the price, and a price-less advert published as clean. A guard that
+// wrongly refuses is worse than one that misses, because the refusal is silent
+// and total. So: the known set is built from rawText AND every number the parser
+// produced, matched numerically rather than as text, with room for the figures a
+// caption legitimately computes.
+
+const MULTIPLIER = { k: 1e3, juta: 1e6, jt: 1e6, mil: 1e6, million: 1e6, m: 1e6, '万': 1e4, '萬': 1e4 }
+// buildParsePrompt accepts "RM 450k", "2.5k/month", "juta"/"mil"/"m" for
+// millions, so the guard has to read every notation the parser does.
+// The leading \b is load-bearing: without it "form 3 bedrooms" reads as "rm 3"
+// the guard reads an invented amount out of the word "form".
+// The trailing boundary is a negative lookahead, NOT \b. \b is defined on
+// [A-Za-z0-9_], so a multiplier that is not an ASCII word character - 万 and
+// 萬 - only satisfied \b when an ASCII character happened to follow it.
+// Measured: 'RM43万 3房' matched 'RM43' and dropped the 万, turning 430,000
+// into 43, so the caption's own asking price looked invented and the repair
+// loop then told the model to delete it. Chinese listings are a large share
+// of this market, so that is not an edge case. The ASCII multipliers keep their
+// boundary (so 'form 3' is not read as 'rm 3'); the CJK ones need none, because
+// '43万3房' is ordinary and a lookahead there drops the 万 again.
+const RM_AMOUNT = /\brm\s*(\d[\d,]*(?:\.\d+)?)\s*((?:k|juta|jt|mil|million|m)\b|万|萬)?/gi
+// Bare figures in the SOURCE only, and never a bare "m" - "12 m" is far more
+// likely a measurement than twelve million, and every entry here only ever
+// makes the guard more permissive.
+const BARE_AMOUNT = /(?<![\w.,])(\d[\d,]*(?:\.\d+)?)\s*((?:k|juta|jt|mil|million)\b|万|萬)?/gi
+
+function amountOf(digits, suffix) {
+  const n = parseFloat(String(digits).replace(/,/g, ''))
+  if (!Number.isFinite(n)) return null
+  const s = String(suffix || '').toLowerCase()
+  return s && MULTIPLIER[s] ? n * MULTIPLIER[s] : n
+}
+
+/** Every money figure this listing can justify, as numbers. Generous on purpose. */
+export function knownAmounts(listing) {
+  const src = String(listing?.rawText || '')
+  const out = new Set()
+  const add = (v) => { if (Number.isFinite(v) && v > 0) out.add(v) }
+
+  for (const m of src.matchAll(RM_AMOUNT)) add(amountOf(m[1], m[2]))
+  for (const m of src.matchAll(BARE_AMOUNT)) {
+    // a bare one- or two-digit number is a bedroom count or a floor, not a price
+    if (!m[2] && m[1].replace(/[,.].*$/, '').length < 3) continue
+    add(amountOf(m[1], m[2]))
+  }
+  // THE PART THE REVERTED ATTEMPT MISSED: what the parser produced. prompts.js
+  // hands the model listing.price verbatim, so listing.price is by definition a
+  // legitimate figure for the caption to carry, however the source spelled it.
+  for (const [k, v] of Object.entries(listing || {})) {
+    if (typeof v === 'number' && /price|rent|value|deposit|fee|amount|psf|monthly|annual|cost/i.test(k)) add(v)
+  }
+  const price = Number(listing?.price)
+  if (Number.isFinite(price) && price > 0) {
+    add(price)
+    add(price * 12)                       // annual rental, computed from the monthly asking price
+    for (const area of [listing?.sqft, listing?.landSqft]) {
+      const a = Number(area)
+      if (!Number.isFinite(a) || a <= 0) continue
+      const psf = price / a
+      add(psf)
+      for (const step of [10, 50, 100]) add(Math.round(psf / step) * step)  // agents quote psf rounded
+    }
+  }
+  return [...out]
+}
+
+/** 1% either way, so a caption that rounds a figure has not invented one. */
+function matchesKnown(v, known) {
+  return known.some((k) => Math.abs(k - v) <= Math.max(1, k * 0.01))
+}
+
+// Room counts. Compared against the PARSED fields, which the parser has already
+// normalised across "2 Bed", "2 bilik tidur" and "2房" - never against rawText,
+// where a bare regex would read "3 storey" or "2+1" as a bedroom count.
+const BED_STATED = /(\d+)\s*[-–]?\s*(?:bedrooms?|bed\b|beds\b|rooms?\b|bilik\s+tidur|bilik(?!\s*(?:air|mandi))\b|房(?:间|間)?|室)/gi
+const BATH_STATED = /(\d+)\s*[-–]?\s*(?:bathrooms?|baths?\b|toilets?|washrooms?|bilik\s+(?:air|mandi)|tandas|厕(?:所)?|浴室?|卫(?:生间|浴)?)/gi
+
+function statedCounts(text, re) {
+  const out = new Set()
+  for (const m of String(text || '').matchAll(re)) {
+    const n = Number(m[1])
+    if (Number.isFinite(n)) out.add(n)
+  }
+  return out
+}
+
+/**
+ * Room counts in the caption that contradict the parsed listing.
+ * Silent whenever the parsed field is absent - an unknown truth cannot be
+ * contradicted - and silent when the SOURCE itself states the caption's number,
+ * so a parser slip can never make the guard refuse a faithful caption.
+ */
+export function contradictsRoomCounts(caption, listing) {
+  const cap = String(caption || '')
+  const out = []
+  // "2+1 rooms" is one Malaysian listing's way of writing a utility room; the
+  // second number is not a bedroom and this is not the pass to interpret it.
+  const plusRooms = /\d\s*\+\s*\d/.test(cap)
+  const fields = [
+    ['bedroom', listing?.bedrooms, BED_STATED, plusRooms],
+    ['bathroom', listing?.bathrooms, BATH_STATED, false],
+  ]
+  for (const [label, parsed, re, skip] of fields) {
+    const n = Number(parsed)
+    if (skip || parsed == null || !Number.isFinite(n)) continue
+    const inSource = statedCounts(listing?.rawText, re)
+    for (const stated of statedCounts(cap, re)) {
+      if (stated === n || inSource.has(stated)) continue
+      out.push(`${stated} ${label}${stated === 1 ? '' : 's'} (the listing says ${n})`)
+    }
+  }
+  return out
+}
+
 /**
  * Returns { missing: [...], invented: [...] } - both empty means the caption
  * honours the listing. `listing` is the parsed listing incl. rawText.
@@ -228,6 +360,23 @@ export function captionViolations(caption, listing) {
   const known = `${srcLow} ${String(listing?.furnishing || '').toLowerCase()} ${String(listing?.tenure || '').toLowerCase()}`
   for (const [claim, grounds] of MATERIAL_CLAIMS) {
     if (claim.test(cap) && !grounds.test(known)) invented.push(cap.match(claim)[0])
+  }
+  // room counts that contradict the parsed listing (2-bed sold as "4 bedrooms")
+  invented.push(...contradictsRoomCounts(cap, listing))
+  // money the listing cannot justify. Skipped entirely when there is nothing to
+  // check against: with no source text and no parsed price, every figure would
+  // look invented and the caption would be refused for having a price at all.
+  const knownMoney = knownAmounts(listing)
+  if (knownMoney.length) {
+    const seen = new Set()
+    for (const m of cap.matchAll(RM_AMOUNT)) {
+      const v = amountOf(m[1], m[2])
+      if (v == null || v <= 0 || matchesKnown(v, knownMoney)) continue
+      const text = m[0].trim()
+      if (seen.has(text)) continue
+      seen.add(text)
+      invented.push(text)
+    }
   }
   // distances/amenities the listing never mentioned ("5 mins to X", "near Y")
   for (const m of cap.matchAll(/\b(\d+\s*min(?:ute)?s?\s+(?:to|from)\s+[^\n,.]{3,30})/gi)) {
