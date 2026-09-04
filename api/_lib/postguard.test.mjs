@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts, knownYields, resolvePropertyName, carriesName, ruleViolations} from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts, knownYields, resolvePropertyName, carriesName, ruleViolations, inventedMarketing} from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -390,7 +390,7 @@ describe('property name extraction across real listing shapes', () => {
       rawText: 'Brand New RENNA RESIDENCE for Rent. The Northbank Kuching. 2 Bed 2 Bath 787 Sqft Fully Furnished 12th Floor. Rental RM2,500 nego. Lydia 0143998011',
     }
     const caption = 'RENNA RESIDENCE — The Northbank Kuching\nRM2,500/month (nego)\n2 Bed 2 Bath | 787 Sqft | 12th Floor | Fully Furnished\nLydia 0143998011'
-    expect(captionViolations(caption, listing)).toEqual({ missing: [], invented: [], warnings: [] })
+    expect(captionViolations(caption, listing)).toEqual({ missing: [], invented: [], warnings: [], marketing: [] })
   })
 })
 
@@ -1230,5 +1230,67 @@ describe("the agent's own trained rules", () => {
     expect(ruleViolations('ROOM\nRM1,500', [])).toEqual([])
     expect(ruleViolations('', ['Never use emoji in captions'])).toEqual([])
     expect(ruleViolations('ROOM', null)).toEqual([])
+  })
+})
+
+// Marketing language the agent never used.
+//
+// The prompt says add no facts, and the model obeys on facts. It still reaches
+// for atmosphere: measured 2026-09-04, a listing saying only "Room for rent
+// Tabuan Jaya. RM1,500/month. Wifi included. Walking distance to ICATS" came
+// back as "Prime Location | Wifi Included | …". Nobody claimed the location was
+// prime. The agent's job is to make their listing look better, not to add
+// selling points on their behalf.
+//
+// A CLOSED list, grounded like the facilities walk: if the agent used the word
+// in any of the three languages, the caption may use it. Deliberately NOT "any
+// adjective" — that would refuse ordinary captions, and a silent refusal costs
+// more than a stray word. It drives the repair round and never blocks.
+describe('marketing language the listing never used', () => {
+  const room = { rawText: 'Room for rent Tabuan Jaya. RM1,500/month. Wifi included. Walking distance to ICATS. Ali 0134445555' }
+
+  describe('catches what the agent never claimed', () => {
+    it('the real case: "Prime Location" on a listing that never said it', () => {
+      expect(inventedMarketing('Prime Location | Wifi Included | Walking distance to ICATS', room)).toContain('prime location')
+    })
+
+    it('luxury, spacious, modern', () => {
+      expect(inventedMarketing('LUXURY ROOM — RM1,500/month', room)).toContain('luxury')
+      expect(inventedMarketing('Spacious and modern room, RM1,500/month', room)).toEqual(expect.arrayContaining(['spacious', 'modern']))
+    })
+
+    it('in Malay and Chinese too', () => {
+      expect(inventedMarketing('Bilik mewah untuk disewa RM1,500 sebulan', room)).toContain('luxury')
+      expect(inventedMarketing('豪华房间出租 月租RM1,500', room)).toContain('luxury')
+    })
+  })
+
+  describe('never refuses a word the agent used themselves', () => {
+    it('English', () => {
+      expect(inventedMarketing('Spacious room — RM1,500/month', { rawText: 'Spacious room for rent. RM1,500/month.' })).toEqual([])
+      expect(inventedMarketing('Prime location condo — RM2,100/month', { rawText: 'Condo at a prime location. RM2,100/month.' })).toEqual([])
+    })
+
+    it('Malay and Chinese', () => {
+      expect(inventedMarketing('Rumah mewah RM1.5 juta', { rawText: 'Rumah mewah untuk dijual. Harga 1.5 juta.' })).toEqual([])
+      expect(inventedMarketing('豪华公寓 RM2,100', { rawText: '豪华公寓出租 月租RM2,100' })).toEqual([])
+    })
+
+    it('leaves ordinary structural language alone', () => {
+      const l = { rawText: 'Tropics City For Sale RM338,000 Edward 0183929100' }
+      expect(inventedMarketing('FOR SALE — TROPICS CITY\nRM338,000\nContact Edward 0183929100', l)).toEqual([])
+    })
+
+    it('says nothing when there is no source text to compare against', () => {
+      expect(inventedMarketing('Luxury spacious modern home', { rawText: '' })).toEqual([])
+    })
+  })
+
+  it('is reported separately from invented FACTS, because it must not block', () => {
+    // A wrong price is worth refusing a listing over. A stray "spacious" that
+    // survived two repair rounds is not.
+    const v = captionViolations('Spacious room — RM1,500/month', { listingType: 'rental', price: 1500, ...room })
+    expect(v.marketing).toContain('spacious')
+    expect(v.invented).toEqual([])
   })
 })

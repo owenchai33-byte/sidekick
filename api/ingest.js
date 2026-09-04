@@ -97,7 +97,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     // is a correction. These are STYLE breaches and never block a publish on
     // their own - only the factual contract does that.
     let rv = ruleViolations(caption, rules, 'facebook_page')
-    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length); attempt++) {
+    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length || (v.marketing || []).length); attempt++) {
       try {
         // The repair resends the prompt WITHOUT the style examples. Measured
         // 2026-09-04: the style guide plus its worked examples is ~966 tokens,
@@ -115,15 +115,16 @@ same JSON shape:
 ${v.missing.length ? `- MISSING (the listing states these; include every one): ${v.missing.join('; ')}` : ''}
 ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}
 ${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}
-${rv.length ? `- THEIR OWN RULES, broken (fix every one, they taught you these): ${rv.join('; ')}` : ''}`)
+${rv.length ? `- THEIR OWN RULES, broken (fix every one, they taught you these): ${rv.join('; ')}` : ''}
+${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it; describe only what they wrote): ${v.marketing.join('; ')}` : ''}`)
         const repaired = extractJson(fix)
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
           const rcap = rparts.join('\n\n• • •\n\n')
           const rvv = captionViolations(rcap, listing)
           const rrules = ruleViolations(rcap, rules, 'facebook_page')
-          const before = v.missing.length + v.invented.length + rv.length
-          const after = rvv.missing.length + rvv.invented.length + rrules.length
+          const before = v.missing.length + v.invented.length + rv.length + (v.marketing || []).length
+          const after = rvv.missing.length + rvv.invented.length + rrules.length + (rvv.marketing || []).length
           if (after < before) { caption = rcap; v = rvv; rv = rrules }
         }
       } catch { break /* repair is best-effort; the verdict below still stands */ }

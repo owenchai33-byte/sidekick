@@ -736,7 +736,12 @@ export function captionViolations(caption, listing) {
     const place = m[1].toLowerCase().replace(/\s+/g, ' ')
     if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
   }
-  return { missing, invented, warnings }
+  // `marketing` is separate from `invented` on purpose. Both drive the repair
+  // round, but only `invented` blocks: a wrong price is a factual error nobody
+  // should publish, while a stray "spacious" that survived two repair attempts
+  // is not worth losing the listing over. Refusing costs more than the word.
+  const marketing = inventedMarketing(cap, listing)
+  return { missing, invented, warnings, marketing }
 }
 
 // -- the agent's OWN trained rules, enforced ---------------------------------
@@ -828,6 +833,53 @@ export function ruleViolations(caption, rules, platform = '') {
         out.push(`they asked you never to say "${word}" — take it out`)
       }
     }
+  }
+  return [...new Set(out)]
+}
+
+// -- marketing language the listing never used --------------------------------
+//
+// The prompt tells the model to add no facts, and it obeys on facts. It still
+// reaches for atmosphere: measured 2026-09-04, a listing that said only "Room
+// for rent Tabuan Jaya. RM1,500/month. Wifi included. Walking distance to
+// ICATS" came back as "Prime Location | Wifi Included | Walking distance to
+// ICATS". "Prime Location" is a claim about the property that nobody made.
+//
+// A CLOSED list, like the facilities walk, and grounded the same way: if the
+// agent used the word - in any of the three languages - the caption may use it.
+// This is deliberately NOT "any adjective". A rule that judged adjectives in
+// general would refuse ordinary captions, and a silent refusal costs more than
+// a stray word. Structural language ("FOR SALE", "Contact", a divider) is not
+// on the list and never will be.
+const MARKETING_CLAIMS = [
+  ['prime location', /\bprime\s+(?:location|area|spot)\b|\blokasi\s+(?:utama|strategik)\b|黄金地段|优越地段/i, /\bprime\b|strategic|strategik|utama|黄金地段|优越/i],
+  ['strategic location', /\bstrategic(?:ally)?\s+(?:located|location)\b/i, /strategic|strategik|prime|黄金地段/i],
+  ['luxury', /\bluxur(?:y|ious)\b|\bmewah\b|豪华/i, /luxur|mewah|豪华|premium/i],
+  ['stunning', /\bstunning\b|\bbreathtaking\b|\bmenakjubkan\b|令人惊叹/i, /stunning|breathtaking|menakjubkan|惊叹/i],
+  ['spacious', /\bspacious\b|\bluas\b|宽敞/i, /spacious|luas|宽敞|大空间/i],
+  ['modern', /\bmodern\b|\bmoden\b|现代/i, /modern|moden|现代|contemporary/i],
+  ['cosy', /\bco[sz]y\b|\bselesa\b|温馨/i, /co[sz]y|selesa|温馨|comfortable/i],
+  ['exclusive', /\bexclusive\b|\beksklusif\b|独家/i, /exclusive|eksklusif|独家/i],
+  ['hidden gem', /\bhidden gem\b|\brare find\b|\bpermata tersembunyi\b/i, /hidden gem|rare|permata/i],
+  ['must see', /\bmust[- ]see\b|\bdon'?t miss\b|\bjangan lepaskan\b|不容错过/i, /must[- ]see|jangan lepaskan|错过/i],
+  ['ideal for', /\b(?:ideal|perfect)\s+for\b|\bsesuai untuk\b|适合/i, /\bideal\b|\bperfect\b|sesuai untuk|适合/i],
+  ['sought after', /\bsought[- ]after\b|\bhighly desirable\b|\bpopular choice\b/i, /sought|desirable|popular/i],
+  ['dream home', /\bdream home\b|\brumah idaman\b|梦想家园/i, /dream|idaman|梦想/i],
+  ['unbeatable', /\bunbeatable\b|\bunmatched\b|\btiada tandingan\b/i, /unbeatable|unmatched|tandingan/i],
+]
+
+/**
+ * Marketing phrases the caption uses that the listing never did. Same contract
+ * as the facilities walk: a CLOSED list, wide grounds, silent when the source
+ * text is empty.
+ */
+export function inventedMarketing(caption, listing) {
+  const cap = String(caption || '')
+  const src = `${listing?.rawText || ''} ${listing?.title || ''}`
+  if (!src.trim() || !cap.trim()) return []
+  const out = []
+  for (const [label, claim, grounds] of MARKETING_CLAIMS) {
+    if (claim.test(cap) && !grounds.test(src)) out.push(label)
   }
   return [...new Set(out)]
 }
