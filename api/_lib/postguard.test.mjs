@@ -2,6 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { buildContentPrompt } from './prompts.js'
 import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts, knownYields, resolvePropertyName, carriesName, ruleViolations, inventedMarketing} from './postguard.js'
 
 // The exact text PostPeer received three times that day.
@@ -1330,5 +1331,38 @@ describe('emoji rules: a blanket ban versus one named emoji', () => {
     // comparing by code point flagged a heart rule on a caption with no heart.
     expect(flagged(CAP, ['No heart emoji'])).toBe(false)
     expect(flagged(`${CAP}\n❤️ Lovely home`, ['No heart emoji'])).toBe(true)
+  })
+})
+
+// A word the agent banned must not reach the model as a FACT.
+//
+// Edward's rule is "never call a condo an apartment". His listing said only
+// "1 Bedroom Unit" — neither word. The parser inferred propertyType
+// "Apartment", buildContentPrompt stated it as "Property type: Apartment", and
+// the model wrote the one word he forbade. Two repair rounds could not argue it
+// back out, because the prompt was asserting it as fact while the rule asked for
+// the opposite. Measured live 2026-09-04.
+//
+// The rule outranks a field the parser inferred rather than read.
+describe('a banned word never enters the prompt as a fact', () => {
+  const listing = {
+    listingType: 'sale', price: 338000, location: 'Tabuan Dayak', propertyName: 'Tropics City',
+    propertyType: 'Apartment', bedrooms: 1, bathrooms: 1, sqft: 800,
+    rawText: 'Tropics City 1 Bedroom Unit RM338,000 800 sqft Edward 0183929100',
+  }
+  const build = (rules) => buildContentPrompt(listing, ['facebook_page'], ['en'], { style: 's', examples: [] }, null, rules)
+
+  it('drops the property type when their rule forbids that word', () => {
+    expect(build(['Never call a condo an apartment'])).not.toContain('Property type: Apartment')
+  })
+
+  it('keeps it when they have no such rule', () => {
+    expect(build([])).toContain('Property type: Apartment')
+    expect(build(['Never use emoji in captions'])).toContain('Property type: Apartment')
+  })
+
+  it('only drops the exact word they named', () => {
+    // "never say luxury" must not silently strip an unrelated property type
+    expect(build(['Never say luxury'])).toContain('Property type: Apartment')
   })
 })

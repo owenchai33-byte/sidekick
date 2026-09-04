@@ -56,6 +56,23 @@ ${rawText}
 }
 
 /** CONTENT: listing + chosen platforms/languages → native copy per combination. */
+/**
+ * True when the agent's own rules forbid this word. Same phrasings ruleViolations
+ * reads, so the prompt and the check can never disagree about what is banned.
+ */
+function bannedByRules(word, rules) {
+  const w = String(word || '').trim().toLowerCase()
+  if (!w) return false
+  for (const raw of Array.isArray(rules) ? rules : []) {
+    const r = String(raw || '').toLowerCase()
+    const m =
+      r.match(/(?:never|don'?t|do not|jangan)\s+call\b.*\ban?\s+([a-z][a-z '-]{2,24})\s*$/) ||
+      r.match(/(?:never|don'?t|do not|jangan)\s+(?:say|use|write|mention)\s+(?:the word\s+)?(?:an?\s+)?["']?([a-z][a-z '-]{2,24}?)["']?\s*$/)
+    if (m && m[1].trim() === w) return true
+  }
+  return false
+}
+
 export function buildContentPrompt(listing, platformIds, languageIds, styleGuide, contact, rules) {
   const platforms = platformIds.map((id) => PLATFORM_MAP[id]).filter(Boolean)
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
@@ -105,7 +122,14 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     nameLine,
     priceLine,
     listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
-    listing.propertyType && `Property type: ${listing.propertyType}`,
+    // A word the agent has BANNED must never reach the model as a fact.
+    // Edward's rule is "never call a condo an apartment"; his listing said only
+    // "1 Bedroom Unit", the parser guessed propertyType "Apartment", and this
+    // line then handed the model the exact word he forbade - stated as fact, so
+    // it wrote it, and two repair rounds could not argue it back out. The rule
+    // outranks a field the parser inferred rather than read.
+    listing.propertyType && !bannedByRules(listing.propertyType, rules)
+      && `Property type: ${listing.propertyType}`,
     listing.bedrooms != null && `Bedrooms: ${listing.bedrooms}`,
     listing.bathrooms != null && `Bathrooms: ${listing.bathrooms}`,
     listing.sqft != null && `Built-up area: ${listing.sqft} sq ft`,
