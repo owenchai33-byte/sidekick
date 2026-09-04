@@ -2,7 +2,7 @@
 // Instagram three times (06:33:13 / 06:34:16 / 06:35:23), carrying demo
 // boilerplate, because the operator asked "fb and ig posted?".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts, knownYields, resolvePropertyName, carriesName } from './postguard.js'
+import { postFingerprint, looksLikeDemoCaption, inventsPriceHistory, captionViolations, propertyNames, knownAmounts, knownYields, resolvePropertyName, carriesName, ruleViolations} from './postguard.js'
 
 // The exact text PostPeer received three times that day.
 const DEMO = `✨ Property in The Northbank — now available
@@ -616,16 +616,19 @@ describe('invented claims the caption makes and the listing never made', () => {
     expect(invented(`${base}\n99 years lease remaining.`, lh)).toEqual('')
   })
 
-  it('no longer refuses ordinary minimum-term boilerplate', () => {
-    expect(invented(`${base}\n12-month tenancy required.`)).toEqual('')
-    expect(invented(`${base}\n2-year lease.`)).toEqual('')
+  it('refuses a lease term the listing never agreed to', () => {
+    // The rule was deleted once for refusing "99-year leasehold" and reading
+    // English only. Both are fixed, and an invented CONTRACTUAL term is worth
+    // catching — a tenant can hold the landlord to it.
+    expect(invented(`${base}\n2-year lease.`)).toMatch(/lease/i)
   })
 
-  it('KNOWN MISS: an invented lease term now publishes; the money on it does not', () => {
-    // Recorded on purpose. A missed claim is recoverable; the silent refusal
-    // this rule caused was not. The money walk still catches the deposit.
+  it('catches BOTH halves of "Deposit RM10,000, 2-year lease"', () => {
+    // Both halves are claims nobody made: a deposit figure and a contractual
+    // term. The money walk catches the first, the lease walk the second — it
+    // used to catch only the money, because the lease rule had been deleted.
     const out = invented(`${base}\nDeposit RM10,000, 2-year lease.`)
-    expect(out).not.toMatch(/lease/)
+    expect(out).toMatch(/lease/i)
     expect(out).toMatch(/RM10,000/)
   })
 
@@ -1109,5 +1112,123 @@ describe('the review corpus: cases a second reader wrote without sight of the ru
     // eslint-disable-next-line no-console
     console.log(`REVIEW MUST-PASS: ${passed}/${REVIEW_PASS.length}`)
     expect(passed).toBe(REVIEW_PASS.length)
+  })
+})
+
+// A lease term is a contractual promise, not marketing copy.
+//
+// An earlier version of this rule was deleted for refusing ordinary copy: it
+// flagged "99-year leasehold" as an invented tenancy, and it read English only,
+// so "Kontrak 2 tahun" and "两年租约" went unchecked. Both families are
+// excludable, and a caption inventing a term nobody agreed to is worth catching
+// — a tenant can hold the landlord to it.
+describe('lease and tenancy terms', () => {
+  const rental = (raw) => ({ listingType: 'rental', price: 1500, rawText: raw })
+  const flagged = (cap, l) => captionViolations(cap, l).invented.some((x) => /lease/i.test(x))
+
+  describe('must not refuse ordinary copy', () => {
+    it('tenure: a 99-year leasehold is not a tenancy', () => {
+      const l = rental('Terrace for rent RM1,500/month. Leasehold, 99 years remaining. Ali 0134445555')
+      expect(flagged('Terrace — RM1,500/month\n99-year lease remaining\nAli 0134445555', l)).toBe(false)
+    })
+
+    it('a term the source states in English', () => {
+      const l = rental('Room RM1,500/month. Minimum 1 year contract. Ali 0134445555')
+      expect(flagged('Room — RM1,500/month\n1-year lease\nAli 0134445555', l)).toBe(false)
+    })
+
+    it('a term the source states in Malay', () => {
+      const l = rental('Rumah sewa RM1,500 sebulan. Kontrak minimum 1 tahun. Ali 0134445555')
+      expect(flagged('Rumah sewa — RM1,500 sebulan\nKontrak 1 tahun\nAli 0134445555', l)).toBe(false)
+    })
+
+    it('a term the source states in Chinese', () => {
+      const l = rental('出租 月租RM1,500 租期两年 联络 0134445555')
+      expect(flagged('出租 月租RM1,500 两年租约 联络 0134445555', l)).toBe(false)
+    })
+
+    it('says nothing when neither side mentions a term', () => {
+      const l = rental('Studio RM1,500/month. Ali 0134445555')
+      expect(flagged('Studio — RM1,500/month\nAli 0134445555', l)).toBe(false)
+    })
+  })
+
+  describe('must catch an invented term, in every language the product writes', () => {
+    const bare = rental('Studio RM1,500/month. Ali 0134445555')
+
+    it('English', () => {
+      expect(flagged('Studio — RM1,500/month\n2-year lease\nAli 0134445555', bare)).toBe(true)
+    })
+
+    it('Malay', () => {
+      const l = rental('Rumah sewa RM1,500 sebulan. Ali 0134445555')
+      expect(flagged('Rumah sewa — RM1,500 sebulan\nKontrak 2 tahun\nAli 0134445555', l)).toBe(true)
+    })
+
+    it('Chinese', () => {
+      const l = rental('出租 月租RM1,500 联络 0134445555')
+      expect(flagged('出租 月租RM1,500 两年租约 联络 0134445555', l)).toBe(true)
+    })
+
+    it('a term written in months', () => {
+      expect(flagged('Studio — RM1,500/month\n12-month tenancy\nAli 0134445555', bare)).toBe(true)
+    })
+  })
+})
+
+// The agent's own trained rules, enforced rather than merely stated.
+//
+// A rule an agent teaches once goes into the prompt. Measured 2026-09-04 on the
+// real model: "Never use emoji in captions" was in the prompt, plainly worded,
+// and the caption came back with emoji. Prose is a hope; a check the repair
+// round can quote back is a correction. These are STYLE breaches — they drive
+// the repair and never block a publish, because refusing a listing over an
+// emoji is the silent-refusal failure this project keeps paying for.
+describe("the agent's own trained rules", () => {
+  const FB = 'facebook_page'
+  const broke = (cap, rules, plat = FB) => ruleViolations(cap, rules, plat).length > 0
+
+  it('catches emoji when they asked for none', () => {
+    expect(broke('🏡 ROOM FOR RENT\nRM1,500/month', ['Never use emoji in captions'])).toBe(true)
+    expect(broke('ROOM FOR RENT\nRM1,500/month', ['Never use emoji in captions'])).toBe(false)
+  })
+
+  it('catches hashtags, and respects the platform they named', () => {
+    expect(broke('ROOM\nRM1,500\n#Kuching', ['No hashtags on Facebook'], FB)).toBe(true)
+    // the same caption on TikTok, where they never banned them
+    expect(broke('ROOM\nRM1,500\n#Kuching', ['No hashtags on Facebook'], 'tiktok')).toBe(false)
+  })
+
+  it('catches a caption longer than the limit they set', () => {
+    expect(broke('a\nb\nc\nd\ne\nf', ['Keep captions under 5 lines'])).toBe(true)
+    expect(broke('a\nb\nc', ['Keep captions under 5 lines'])).toBe(false)
+  })
+
+  it('catches a price buried below where they wanted it', () => {
+    expect(broke('ROOM\nTabuan Jaya\nWifi\nRM1,500/month', ['Put the price in the first two lines'])).toBe(true)
+    expect(broke('ROOM\nRM1,500/month\nWifi', ['Put the price in the first two lines'])).toBe(false)
+  })
+
+  it('catches a word they banned, in both ways they phrase it', () => {
+    expect(broke('Nice apartment\nRM1,500', ['Never call a condo an apartment'])).toBe(true)
+    expect(broke('Nice condo\nRM1,500', ['Never call a condo an apartment'])).toBe(false)
+    expect(broke('LUXURY CONDO\nRM1,500', ['Never say luxury'])).toBe(true)
+  })
+
+  it('catches a caption in the wrong language', () => {
+    expect(broke('Room for rent\nRM1,500', ['Write captions in Chinese'])).toBe(true)
+    expect(broke('出租房间\nRM1,500', ['Write captions in Chinese'])).toBe(false)
+  })
+
+  it('says nothing about a rule it cannot mechanically check', () => {
+    // The safety property: an unreadable rule must never produce a violation,
+    // or a vaguely worded rule would block every caption an agent ever gets.
+    expect(ruleViolations('anything at all', ['Make it punchier', 'Sound more premium', 'Always mention the carpark'])).toEqual([])
+  })
+
+  it('says nothing when there are no rules, or the caption is empty', () => {
+    expect(ruleViolations('ROOM\nRM1,500', [])).toEqual([])
+    expect(ruleViolations('', ['Never use emoji in captions'])).toEqual([])
+    expect(ruleViolations('ROOM', null)).toEqual([])
   })
 })

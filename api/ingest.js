@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { inventsPriceHistory, captionViolations } from './_lib/postguard.js'
+import { inventsPriceHistory, captionViolations, ruleViolations} from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
@@ -90,7 +90,14 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     // (2/6 -> 6/6), but a single figure - the annual rental - still slipped
     // half the time. The second pass is cheap next to publishing an advert
     // that quietly drops one of the agent's selling points.
-    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length); attempt++) {
+    // The agent's own trained rules are checked too, not just the facts. They
+    // were in the prompt and being ignored: measured 2026-09-04, "Never use
+    // emoji in captions" was stated plainly and the caption came back with
+    // emoji. An instruction is a hope; a check the repair round can quote back
+    // is a correction. These are STYLE breaches and never block a publish on
+    // their own - only the factual contract does that.
+    let rv = ruleViolations(caption, rules, 'facebook_page')
+    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length); attempt++) {
       try {
         // The repair resends the prompt WITHOUT the style examples. Measured
         // 2026-09-04: the style guide plus its worked examples is ~966 tokens,
@@ -107,13 +114,17 @@ YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
 same JSON shape:
 ${v.missing.length ? `- MISSING (the listing states these; include every one): ${v.missing.join('; ')}` : ''}
 ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}
-${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}`)
+${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}
+${rv.length ? `- THEIR OWN RULES, broken (fix every one, they taught you these): ${rv.join('; ')}` : ''}`)
         const repaired = extractJson(fix)
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
           const rcap = rparts.join('\n\n• • •\n\n')
-          const rv = captionViolations(rcap, listing)
-          if (rv.missing.length + rv.invented.length < v.missing.length + v.invented.length) { caption = rcap; v = rv }
+          const rvv = captionViolations(rcap, listing)
+          const rrules = ruleViolations(rcap, rules, 'facebook_page')
+          const before = v.missing.length + v.invented.length + rv.length
+          const after = rvv.missing.length + rvv.invented.length + rrules.length
+          if (after < before) { caption = rcap; v = rvv; rv = rrules }
         }
       } catch { break /* repair is best-effort; the verdict below still stands */ }
     }

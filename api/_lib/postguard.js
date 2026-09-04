@@ -499,34 +499,85 @@ export function knownYields(listing) {
 /** 0.3 of a percentage point, so 4.6% and 4.62% are the same claim. */
 const yieldKnown = (v, known) => known.some((k) => Math.abs(k - v) <= 0.3)
 
-// -- lease / tenancy terms: DELETED 2026-09-04, and not coming back ----------
+// -- lease / tenancy terms ---------------------------------------------------
 //
-// The rule was: "2-year lease" / "12-month tenancy" in the caption, cleared
-// only by a duration of the same length somewhere in the listing. It was
-// removed rather than narrowed, because both of its false-positive families
-// are the ordinary copy of this market and only one of them is fixable:
+// A caption that invents "2-year lease" is inventing a CONTRACTUAL term nobody
+// agreed to, which is worse than most marketing puff - a tenant can hold the
+// landlord to it. So this rule earns its place, but a first version was deleted
+// on 2026-09-04 for refusing ordinary copy, and both of its false-positive
+// families have to stay excluded:
 //
-//   TENURE. "99-year lease" and "99 years lease remaining" are how a leasehold
-//   listing is written, and a leasehold listing states its tenure as a WORD,
-//   so the source side could never ground them. Both refused, measured against
-//   a listing whose own tenure field said Leasehold. (An excludable case: a
-//   term over ~20 years is tenure, not a tenancy.)
+//   TENURE. "99-year lease", "99 years lease remaining" is how a leasehold
+//   listing is written, and the source states its tenure as a WORD
+//   ("Leasehold"), so a duration match could never ground it. Excluded by
+//   length: nobody rents for twenty years, so a term that long is tenure. Also
+//   excluded when a tenure word sits next to it, in any of the three languages.
 //
-//   THE MINIMUM TERM. "Minimum 1 year", "2 years contract", "12-month tenancy"
-//   is boilerplate on Malaysian rental ads, and a listing almost never writes
-//   the duration as a digit - "RM1,500 per month" carries no term at all. That
-//   IS the rule's entire remaining target, so it cannot be excluded: narrowing
-//   it to safety narrows it to nothing.
+//   A TERM THE SOURCE DOES STATE, in any wording. "Minimum 1 year", "sewa
+//   minimum 2 tahun", "租期两年" all ground a caption's term, and so does a bare
+//   mention of a tenancy period without a number - if the landlord raised the
+//   subject at all, the caption repeating it is not an invention.
 //
-// And it read English only. "Kontrak 2 tahun" and "两年租约" passed unchecked
-// no matter what the listing said, so it refused honest English while letting
-// the same claim through in the two other languages this product writes in.
-// A guard that is one-third effective and refuses ordinary copy is worse than
-// no guard: a missed claim is recoverable, a silent refusal is not.
-//
-// KNOWN MISS, stated plainly: a caption that invents "2-year lease" against a
-// listing that names no term now publishes. The money on that same line
-// ("Deposit RM10,000") is still caught, by the money walk.
+// And it reads all three languages now. The English-only version refused honest
+// English while letting "Kontrak 2 tahun" and "两年租约" through unchecked, which
+// is the worst of both.
+const CJK_NUM = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+const numOf = (raw) => {
+  const t = String(raw || '').trim()
+  if (/^\d+$/.test(t)) return Number(t)
+  if (CJK_NUM[t]) return CJK_NUM[t]
+  return NaN
+}
+
+// [pattern, unit] — the capture group is the duration.
+const LEASE_CLAIM = [
+  [/(\d+)[\s-]*(?:year|yr)s?[\s-]*(?:lease|tenancy|contract|rental agreement)/gi, 'y'],
+  [/(?:lease|tenancy|contract)[\s-]*(?:of|for)?[\s-]*(\d+)[\s-]*(?:year|yr)s?/gi, 'y'],
+  [/(\d+)[\s-]*months?[\s-]*(?:lease|tenancy|contract|rental agreement)/gi, 'm'],
+  [/(?:lease|tenancy|contract)[\s-]*(?:of|for)?[\s-]*(\d+)[\s-]*months?/gi, 'm'],
+  [/(?:kontrak|sewa|tempoh)[\s-]*(?:minimum|min)?[\s-]*(\d+)[\s-]*tahun/gi, 'y'],
+  [/(\d+)[\s-]*tahun[\s-]*(?:kontrak|sewa|tempoh)/gi, 'y'],
+  [/(?:kontrak|sewa|tempoh)[\s-]*(?:minimum|min)?[\s-]*(\d+)[\s-]*bulan/gi, 'm'],
+  [/([\d一二两三四五六七八九十]+)\s*年\s*(?:租约|租期|合约|合同)/g, 'y'],
+  [/(?:租约|租期|合约|合同)\s*([\d一二两三四五六七八九十]+)\s*年/g, 'y'],
+  [/([\d一二两三四五六七八九十]+)\s*(?:个)?月\s*(?:租约|租期|合约|合同)/g, 'm'],
+  // "minimum 12 months" / "min 1 year" / "minimum 2 tahun" — a term stated
+  // without ever using the word lease, which is how most Malaysian rental ads
+  // write it. Without these the SOURCE side missed its own term and the caption
+  // repeating it read as an invention.
+  [/\b(?:minimum|min\.?|at least)[\s-]*(\d+)[\s-]*(?:year|yr|tahun)s?\b/gi, 'y'],
+  [/\b(?:minimum|min\.?|at least)[\s-]*(\d+)[\s-]*(?:month|bulan)s?\b/gi, 'm'],
+  [/(\d+)[\s-]*(?:month|bulan)s?[\s-]*(?:minimum|min\.?)\b/gi, 'm'],
+  [/(\d+)[\s-]*(?:year|yr|tahun)s?[\s-]*(?:minimum|min\.?)\b/gi, 'y'],
+  [/(?:最少|至少|最短)\s*([\d一二两三四五六七八九十]+)\s*年/g, 'y'],
+  [/(?:最少|至少|最短)\s*([\d一二两三四五六七八九十]+)\s*(?:个)?月/g, 'm'],
+]
+
+// Tenure words in all three languages. Near a duration, it is not a tenancy.
+const TENURE_NEAR = /leasehold|freehold|tenure|geran|hakmilik|pegangan|地契|产权|永久|租赁地/i
+// The source raised the subject of a term at all — a number is not required.
+const SOURCE_HAS_TERM = /\b(lease|tenancy|contract|minimum|min\.?|at least)\b|kontrak|tempoh\s*sewa|sewa\s*minimum|租约|租期|合约|合同|最少|至少|最短/i
+
+/** Every lease/tenancy term stated in a text, normalised to months. */
+function leaseTermsIn(text) {
+  const t = String(text || '')
+  const out = new Set()
+  for (const [re, unit] of LEASE_CLAIM) {
+    re.lastIndex = 0
+    for (const m of t.matchAll(re)) {
+      const n = numOf(m[1])
+      if (!Number.isFinite(n) || n <= 0) continue
+      const months = unit === 'y' ? n * 12 : n
+      // Twenty years is not a tenancy, it is tenure. And a tenure word beside
+      // the match settles it whatever the length.
+      if (months >= 240) continue
+      const around = t.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30)
+      if (TENURE_NEAR.test(around)) continue
+      out.add(months)
+    }
+  }
+  return out
+}
 
 // -- facilities --------------------------------------------------------------
 // A CLOSED list. Each entry is [what the caption claimed, how the caption says
@@ -655,6 +706,20 @@ export function captionViolations(caption, listing) {
       }
     }
   }
+  // LEASE / TENANCY TERM the listing never agreed to. A term is a contractual
+  // promise a tenant can hold the landlord to, so an invented one is worse than
+  // most marketing puff. Cleared by the same term in the source, or by the
+  // source raising a term at all - if the landlord mentioned a tenancy period
+  // in any wording, the caption repeating it is not an invention. Tenure is
+  // excluded inside leaseTermsIn, by length and by the words around it.
+  if (srcLow.trim() && !SOURCE_HAS_TERM.test(src)) {
+    const srcTerms = leaseTermsIn(src)
+    for (const months of leaseTermsIn(cap)) {
+      if (srcTerms.has(months)) continue
+      const label = months % 12 === 0 ? `${months / 12}-year lease` : `${months}-month lease`
+      if (!invented.includes(label)) invented.push(label)
+    }
+  }
   // FACILITIES from the closed list above, where the listing mentions nothing
   // of the sort. "Gated and guarded, 24-hour security, swimming pool, gym" is
   // four promises about a building the agent described in one line.
@@ -672,4 +737,97 @@ export function captionViolations(caption, listing) {
     if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
   }
   return { missing, invented, warnings }
+}
+
+// -- the agent's OWN trained rules, enforced ---------------------------------
+//
+// An agent teaches a rule once ("never use emoji in my captions") and it goes
+// into the prompt. Measured 2026-09-04 on the real model: the rule was in the
+// prompt, plainly worded, and the caption came back with emoji anyway. That is
+// the same shape as every other failure this file exists for — an instruction
+// is a hope, a check is a guarantee.
+//
+// Only MECHANICALLY CHECKABLE rules are handled. "Make it punchier" is not
+// checkable and is deliberately ignored; an unrecognised rule produces no
+// violation, so a rule this cannot read can never refuse a caption.
+//
+// These are STYLE violations, not factual ones. They feed the repair round so
+// the model fixes its own output, but they must never block a publish on their
+// own: an emoji the agent dislikes is not worth refusing a listing over, and a
+// silent refusal is the failure mode this project keeps paying for.
+const EMOJI = /[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F2FF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u
+
+/**
+ * Style-rule breaches in a caption, as plain sentences the repair prompt can
+ * quote back. `rules` is the agent's own list; `platform` narrows the ones that
+ * name a platform. Never throws, never blocks — the caller decides.
+ */
+export function ruleViolations(caption, rules, platform = '') {
+  const cap = String(caption || '')
+  const out = []
+  if (!cap.trim()) return out
+  const plat = String(platform || '').toLowerCase()
+
+  for (const raw of Array.isArray(rules) ? rules : []) {
+    const r = String(raw || '').toLowerCase()
+    if (!r.trim()) continue
+
+    // no emoji
+    if (/\bno\b.*\bemoji|never.*\bemoji|without emoji|不要.*表情|jangan.*emoji/.test(r) && EMOJI.test(cap)) {
+      out.push(`they asked for no emoji — remove every emoji`)
+    }
+
+    // no hashtags, optionally scoped to a platform
+    if (/\bno\b.*hashtag|never.*hashtag|jangan.*hashtag|不要.*标签/.test(r) && /(^|\s)#\w/.test(cap)) {
+      const named = r.match(/facebook|instagram|tiktok/)
+      if (!named || !plat || named[0] === plat.replace('_page', '')) {
+        out.push(`they asked for no hashtags${named ? ` on ${named[0]}` : ''} — remove them`)
+      }
+    }
+
+    // a line cap: "keep captions under 5 lines", "max 8 lines"
+    const lineCap = r.match(/(?:under|below|max(?:imum)?|no more than|less than)\s*(\d+)\s*lines?/)
+    if (lineCap) {
+      const limit = Number(lineCap[1])
+      const lines = cap.split('\n').filter((l) => l.trim()).length
+      if (Number.isFinite(limit) && lines > limit) {
+        out.push(`they asked for under ${limit} lines — this is ${lines}, cut it down`)
+      }
+    }
+
+    // the price near the top: "put the price in the first two lines"
+    const pricePos = r.match(/price.*first\s*(\w+)\s*lines?/)
+    if (pricePos) {
+      const words = { one: 1, two: 2, three: 3, four: 4, five: 5 }
+      const n = Number(pricePos[1]) || words[pricePos[1]] || 2
+      const head = cap.split('\n').filter((l) => l.trim()).slice(0, n).join(' ')
+      if (/rm\s?[\d,]/i.test(cap) && !/rm\s?[\d,]/i.test(head)) {
+        out.push(`they asked for the price in the first ${n} lines — move it up`)
+      }
+    }
+
+    // a language preference: "write captions in Chinese" / "in Malay"
+    if (/\b(write|caption).*\b(in )?(chinese|中文|mandarin)\b|用中文/.test(r)) {
+      if (!/[一-鿿]/.test(cap)) out.push(`they asked for Chinese captions — write it in Chinese`)
+    }
+    if (/\b(write|caption).*\b(in )?(malay|bahasa|bm)\b/.test(r) && /[一-鿿]/.test(cap)) {
+      out.push(`they asked for Malay captions — write it in Malay`)
+    }
+
+    // a forbidden word. Two shapes an agent actually writes:
+    //   "never call a condo an apartment"  -> the banned word is the LAST one
+    //   "never say luxury"                 -> the banned word follows the verb
+    const banned =
+      // greedy .* so the LAST "a/an" wins: "never call a condo an apartment"
+      // must ban "apartment", not "condo an apartment".
+      r.match(/(?:never|don'?t|do not|jangan)\s+call\b.*\ban?\s+([a-z][a-z '-]{2,24})\s*$/) ||
+      r.match(/(?:never|don'?t|do not|jangan)\s+(?:say|use|write|mention)\s+(?:the word\s+)?(?:an?\s+)?["']?([a-z][a-z '-]{2,24}?)["']?\s*$/)
+    if (banned) {
+      const word = banned[1].trim()
+      if (word.length > 2 && new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(cap)) {
+        out.push(`they asked you never to say "${word}" — take it out`)
+      }
+    }
+  }
+  return [...new Set(out)]
 }
