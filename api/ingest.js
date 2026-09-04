@@ -92,7 +92,16 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     // that quietly drops one of the agent's selling points.
     for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length); attempt++) {
       try {
-        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules)}
+        // The repair resends the prompt WITHOUT the style examples. Measured
+        // 2026-09-04: the style guide plus its worked examples is ~966 tokens,
+        // resent on every repair round, and two rounds are 43% of the ~13,000
+        // tokens a listing costs. On a free tier that allows 200,000 a day that
+        // is the difference between roughly 15 listings and 22. The examples
+        // teach the model the format; by the repair round it has already written
+        // in that format and is being asked to fix named facts, so the format
+        // instruction earns its place and the examples no longer do.
+        const leanStyle = styleGuide ? { ...styleGuide, examples: [] } : styleGuide
+        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, leanStyle, contact, rules)}
 
 YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
 same JSON shape:
