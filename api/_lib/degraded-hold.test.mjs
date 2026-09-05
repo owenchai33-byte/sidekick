@@ -115,6 +115,12 @@ const MUST_PASS = [
   'Studio in Kuching — RM650 a month',
 ]
 
+// NOTE (2026-09-04): these expectations changed when the template stopped
+// substituting a location. It used to say "Kuching" whenever the parser found
+// none — see #6, #7 and #8 below, which now name no town at all — and it used to
+// end every caption "#KuchingProperty #Sarawak" whatever the listing said. Both
+// were false facts about a real property, produced with no model in the loop.
+//
 // The specific bad output being targeted: the deterministic template at
 // ingest.js reelScript(), in the shapes it actually produces and the shapes it
 // survives in after the Mac trims it (hashtags stripped, em dash flattened —
@@ -244,28 +250,28 @@ describe('ingest(reel) marks its own fallback', () => {
 // from the code under test, not written by hand: if the template drifts, these
 // fail, and the flag would then be describing something else.
 const FALLBACK = [
-  ['For rent in Kuching, RM1,300 per month, 3 rooms',
-   'Property in Kuching — RM1,300 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Apartment at Batu Kawa for sale RM480,000, 3 bed 2 bath',
-   'Apartment in Batu Kawa — RM480,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Terrace in Kota Samarahan, 620,000 nego, 4 bed 3 bath',
-   'Terrace in Kota Samarahan  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Semi-D at Green Heights, 1.25 juta, 5 bed 4 bath',
-   'Semi-D in Green Heights — RM1,250,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Condo in Petra Jaya for rent RM2.1k/month, 2 rooms',
-   'Condo in Petra Jaya — RM2,100 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Land at Matang, 450k nego, freehold',
-   'Land in Matang — RM450,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['古晋 BDC 排屋出售 售价 430,000, 3 房 2 厕',
-   'Property in Kuching  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Rumah teres di Samarahan, RM520,000, 4 bilik 3 tandas',
-   'Property in Kuching — RM520,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['SHOPLOT AT STUTONG BARU FOR RENT RM3,500/MO, 22FT FRONTAGE',
-   'Shoplot in Kuching — RM3,500 a month 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['Detached house at Tabuan Jaya, 5 bed 4 bath, price on ask',
-   'Detached in Tabuan Jaya  🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
-  ['New listing at Jalan Song\nApartment for sale\nRM390,000\n3 bed 2 bath, 900 sqft',
-   'Apartment in Jalan Song\nApartment — RM390,000 🏡 #KuchingProperty #Sarawak #PropertyMalaysia'],
+  ["For rent in Kuching, RM1,300 per month, 3 rooms",
+   "Property in Kuching — RM1,300 a month 🏡 #KuchingProperty #PropertyMalaysia"],
+  ["Apartment at Batu Kawa for sale RM480,000, 3 bed 2 bath",
+   "Apartment in Batu Kawa — RM480,000 🏡 #BatuKawaProperty #PropertyMalaysia"],
+  ["Terrace in Kota Samarahan, 620,000 nego, 4 bed 3 bath",
+   "Terrace in Kota Samarahan  🏡 #KotaSamarahanProperty #PropertyMalaysia"],
+  ["Semi-D at Green Heights, 1.25 juta, 5 bed 4 bath",
+   "Semi-D in Green Heights — RM1,250,000 🏡 #GreenHeightsProperty #PropertyMalaysia"],
+  ["Condo in Petra Jaya for rent RM2.1k/month, 2 rooms",
+   "Condo in Petra Jaya — RM2,100 a month 🏡 #PetraJayaProperty #PropertyMalaysia"],
+  ["Land at Matang, 450k nego, freehold",
+   "Land in Matang — RM450,000 🏡 #MatangProperty #PropertyMalaysia"],
+  ["古晋 BDC 排屋出售 售价 430,000, 3 房 2 厕",
+   "Property  🏡 #PropertyMalaysia"],
+  ["Rumah teres di Samarahan, RM520,000, 4 bilik 3 tandas",
+   "Property — RM520,000 🏡 #PropertyMalaysia"],
+  ["SHOPLOT AT STUTONG BARU FOR RENT RM3,500/MO, 22FT FRONTAGE",
+   "Shoplot — RM3,500 a month 🏡 #PropertyMalaysia"],
+  ["Detached house at Tabuan Jaya, 5 bed 4 bath, price on ask",
+   "Detached in Tabuan Jaya  🏡 #TabuanJayaProperty #PropertyMalaysia"],
+  ["New listing at Jalan Song\nApartment for sale\nRM390,000\n3 bed 2 bath, 900 sqft",
+   "Apartment in Jalan Song Apartment — RM390,000 🏡 #JalanSongApartmentProperty #PropertyMalaysia"],
 ]
 
 const reelBodyFor = (text) => ({ mode: 'reel', profileId: 'p1', text, images: ['https://cdn.test/photo1.jpg'] })
@@ -417,5 +423,81 @@ describe('the reel repair keeps the good copy', () => {
   it('the guard is present in the source, not just in this test', async () => {
     const src = await import('node:fs').then((fs) => fs.readFileSync('api/ingest.js', 'utf8'))
     expect(src).toMatch(/if \(!retry\.degraded && rv2\.invented\.length < rv\.invented\.length\)/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE HOLD BODY. The reel caller used to assemble its own /api/hold request from
+// this response and silently left two fields out: captionDegraded (so hold.js
+// defaulted it to false and the ✅ saw a clean record) and the listing text (so
+// approve.js had no source and its fact check returned [] for every reel ever
+// held). Both are now assembled server-side, where they cannot be forgotten.
+
+describe('ingest(reel) hands back a hold body that cannot lose a field', () => {
+  const LISTING = 'Riveria Residence Kuching for sale RM498,000. 1,100 sqft, 3 bed 2 bath. Fully furnished. WhatsApp Kelvin 012-345 6789'
+
+  beforeEach(() => {
+    providers.providerStatus.mockReturnValue({ configured: true, provider: 'gemini' })
+    providers.runModel.mockRejectedValue(new Error('429 quota exceeded'))
+  })
+
+  it('carries the degraded flag and its reason', async () => {
+    const reel = await ingest(reelBodyFor(LISTING))
+    expect(reel.body.holdBody.captionDegraded).toBe(true)
+    expect(reel.body.holdBody.captionDegradedReason).toMatch(/template/i)
+  })
+
+  it('carries the agent\'s own listing text, under a name hold.js accepts', async () => {
+    const reel = await ingest(reelBodyFor(LISTING))
+    // Not a bare `text`: hold.js takes sourceText/rawText only, precisely so a
+    // reel hook or a voiceover line cannot be mistaken for the listing.
+    expect(reel.body.holdBody.sourceText).toContain('Riveria Residence')
+    expect(reel.body.holdBody.text).toBeUndefined()
+  })
+
+  it('held VERBATIM, the source really is stored and the ✅ really does refuse', async () => {
+    const reel = await ingest(reelBodyFor(LISTING))
+    // Exactly what the caller should now send: the body it was given, plus only
+    // the two things it alone knows.
+    await hold({ ...reel.body.holdBody, mediaItems: MEDIA, cover: reel.body.card })
+    const rec = heldRecord()
+    expect(rec.captionDegraded).toBe(true)
+    expect(rec.source?.text).toContain('Riveria Residence')
+
+    pending.getPending.mockResolvedValue(rec)
+    const a = await approve({ id: 'e5f48cc5', decision: 'approve' })
+    expect(a.statusCode).toBe(409)
+    expect(social.postToConnected).not.toHaveBeenCalled()
+  })
+
+  it('THE OLD BUG: a caller that rebuilds the body by hand and forgets both fields', async () => {
+    // Pinned so the cost of the old shape stays visible. This is what
+    // tools/sidekick.mjs did — and the post published.
+    const reel = await ingest(reelBodyFor(LISTING))
+    await hold({ caption: reel.body.caption, mediaItems: MEDIA, platforms: ['tiktok'], profileId: 'p1' })
+    const rec = heldRecord()
+    expect(rec.captionDegraded).toBe(false)   // the flag was never sent
+    expect(rec.source).toBe(null)             // and there is nothing to check against
+
+    pending.getPending.mockResolvedValue(rec)
+    const a = await approve({ id: 'e5f48cc5', decision: 'approve' })
+    expect(a.statusCode).toBe(200)            // template copy, straight to TikTok
+  })
+
+  it('the good path is unchanged: a real caption holds clean and publishes', async () => {
+    providers.runModel.mockResolvedValue('{}')
+    providers.extractJson.mockReturnValue({
+      script: 'Riveria Residence in Kuching, three bedrooms, RM498,000. Message me for a viewing.',
+      caption: 'Riveria Residence, Kuching — RM498,000\n1,100 sq ft, 3 bed 2 bath\nWhatsApp Kelvin 012-345 6789',
+    })
+    const reel = await ingest(reelBodyFor(LISTING))
+    expect(reel.body.holdBody.captionDegraded).toBe(false)
+    expect(reel.body.holdBody.captionDegradedReason).toBeUndefined()
+
+    await hold({ ...reel.body.holdBody, mediaItems: MEDIA })
+    pending.getPending.mockResolvedValue(heldRecord())
+    const a = await approve({ id: 'e5f48cc5', decision: 'approve' })
+    expect(a.statusCode).toBe(200)
+    expect(social.postToConnected).toHaveBeenCalledOnce()
   })
 })

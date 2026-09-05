@@ -6,6 +6,11 @@
 // stayed empty, and the first screen anyone opens showed a red
 // "No accounts — connect" over an account with Facebook, Instagram and TikTok
 // all live. Absent evidence reported as a fact, owner-facing.
+//
+// The badge is now answered for the profile the CALLER named (the home screen
+// sends the one from their own SideKick link), and answered "I cannot tell" when
+// they named none. The tests below therefore name a profile where they used to
+// rely on the default - the assertion each one makes is unchanged.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const social = { connectedAccounts: vi.fn(), defaultProfile: vi.fn(), providerConfigured: vi.fn() }
@@ -16,10 +21,12 @@ vi.mock('./pending.js', () => ({ listPending: vi.fn(async () => []) }))
 
 const { default: handler } = await import('../feed.js')
 
-const call = async () => {
+const PROFILE = '6a90f9f6f59d1531f8d04018'
+
+const call = async (url = `/api/feed?profile=${PROFILE}`) => {
   const res = { statusCode: 200, body: null, setHeader() {}, status(c) { this.statusCode = c; return this },
     end(b) { this.body = typeof b === 'string' ? JSON.parse(b) : b; return this } }
-  await handler({ method: 'GET', url: '/api/feed', headers: {} }, res)
+  await handler({ method: 'GET', url, headers: {} }, res)
   return res.body
 }
 
@@ -47,5 +54,22 @@ describe('the connected-accounts badge', () => {
     const body = await call()
     expect(body.status.connectedAccounts).toBe(2)
     expect(body.status.platforms).toEqual(['facebook', 'tiktok'])
+  })
+
+  it('asks about the profile the caller named, not a default one', async () => {
+    social.connectedAccounts.mockResolvedValue([])
+    await call()
+    expect(social.connectedAccounts).toHaveBeenCalledWith(PROFILE)
+    // Configuring a default profile is what silently re-arms cross-tenant
+    // publishing (_lib/social.js). This screen must never be the reason someone
+    // sets one.
+    expect(social.defaultProfile).not.toHaveBeenCalled()
+  })
+
+  it('says "I cannot tell" — and asks nobody — when no profile is named', async () => {
+    social.connectedAccounts.mockResolvedValue([{ platform: 'facebook' }])
+    const body = await call('/api/feed')
+    expect(body.status.connectedAccounts).toBeNull()
+    expect(social.connectedAccounts).not.toHaveBeenCalled()
   })
 })

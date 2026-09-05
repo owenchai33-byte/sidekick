@@ -5,6 +5,7 @@ import { parseListing, generateContent, pickCover } from '../lib/ai.js'
 import { renderGraphicCanvas, loadImage, thumbBase64 } from '../lib/graphics.js'
 import { uploadMedia } from '../lib/upload.js'
 import { captionFor } from '../lib/social.js'
+import { tenantFields, tenantQuery } from '../lib/tenant.js'
 import MediaUploader from '../components/MediaUploader.jsx'
 import PostPreview from '../components/PostPreview.jsx'
 import { PLATFORM_MAP } from '../../shared/constants.js'
@@ -101,7 +102,12 @@ export default function CreatePostPage() {
   // On the Post step, check which accounts the agent has connected.
   useEffect(() => {
     if (step !== 3) return
-    fetch('/api/social-accounts').then((r) => r.json()).then((j) => setAccounts(j.accounts || [])).catch(() => setAccounts([]))
+    // Name the agent. Without a profile this asked for "the default account
+    // list", which in production is nobody's — so it has been rendering zero
+    // connected accounts since the switch to PostPeer — and would have been one
+    // shared tenant's the moment a default was configured.
+    const q = tenantQuery()
+    fetch('/api/social-accounts' + (q ? `?${q}` : '')).then((r) => r.json()).then((j) => setAccounts(j.accounts || [])).catch(() => setAccounts([]))
   }, [step])
 
   async function autopost() {
@@ -113,7 +119,7 @@ export default function CreatePostPage() {
       const canvas = renderGraphicCanvas({ listing, brand: settings.brand, format: 'square', photo, logo })
       const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92))
       const mediaUrl = await uploadMedia(blob, `${listing.id}-graphic.jpg`)
-      const res = await fetch('/api/social-broadcast', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caption, mediaUrl, mediaType: 'image' }) })
+      const res = await fetch('/api/social-broadcast', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caption, mediaUrl, mediaType: 'image', ...tenantFields() }) })
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || 'Post failed')
       toast(`Posted to ${(j.posted || []).join(', ')} 🎉`, 'success')

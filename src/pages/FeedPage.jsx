@@ -35,6 +35,10 @@ export default function FeedPage() {
   // the same as none connected. Saying "No accounts" there told the owner their
   // live accounts were missing.
   const accountsKnown = typeof status?.connectedAccounts === 'number'
+  // 'anonymous' = this device has never opened an agent's own SideKick link, so
+  // the server correctly refused to guess whose feed to show.
+  const unscoped = status?.scope === 'anonymous'
+  const olderHidden = Number(status?.untaggedPosts) || 0
   const accountsOn = accountsKnown && status.connectedAccounts > 0
   const live = !!status?.providerConfigured
 
@@ -101,7 +105,21 @@ export default function FeedPage() {
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16v12H5.2L4 17.5V4z" /><path d="M8 9h8M8 12h5" /></svg>
           </div>
           <h2>No posts yet</h2>
-          <p className="muted">When a listing lands in your WhatsApp group, your agent writes it up and posts it — it’ll show here automatically.</p>
+          {/* WHY the list is empty, in words.
+              This screen used to show every agent on the install the same feed,
+              because /api/feed answered one unauthenticated GET with all of it.
+              It is now scoped to the agent whose SideKick link this device
+              opened — so a device that has never opened one legitimately has
+              nothing to show, and saying "no posts yet" on its own would be the
+              silent half of a real problem. */}
+          {unscoped ? (
+            <p className="muted">This device hasn’t been opened from your personal SideKick link yet, so there’s nothing to show here. Tap the link your admin sent you on WhatsApp — it ends in <code>?profile=…</code> — and this becomes your own feed.</p>
+          ) : (
+            <p className="muted">When a listing lands in your WhatsApp group, your agent writes it up and posts it — it’ll show here automatically.</p>
+          )}
+          {olderHidden ? (
+            <p className="muted" style={{ marginTop: 8 }}>{olderHidden} earlier post{olderHidden > 1 ? 's are' : ' is'} hidden: {olderHidden > 1 ? 'they were' : 'it was'} logged before posts recorded which agent they belong to.</p>
+          ) : null}
           <div className="feed-empty-actions">
             {!accountsOn && <Link to="/settings" className="btn btn-primary">Connect accounts</Link>}
             <Link to="/create" className="btn btn-subtle">Post one manually</Link>

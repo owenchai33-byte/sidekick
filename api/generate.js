@@ -7,6 +7,7 @@
 import { buildParsePrompt, buildContentPrompt, buildPlanPrompt, buildRefinePrompt, buildCoverPrompt, buildReadListingPrompt } from './_lib/prompts.js'
 import { runModel, runModelVision, extractJson, providerStatus, visionStatus } from './_lib/providers.js'
 import { demoContent, demoParse, demoPlan } from '../shared/demo.js'
+import { clientIp, hasIngestSecret, rateLimit } from './_lib/tenant.js'
 
 function send(res, status, payload) {
   res.statusCode = status
@@ -41,6 +42,44 @@ export default async function handler(req, res) {
 
   const { action } = body || {}
   const status = providerStatus()
+
+  // THE TOKEN BUDGET IS THE PRODUCT CEILING. This route is unauthenticated by
+  // necessity - six screens call it through src/lib/ai.js and not one of them
+  // has an identity to present - so anyone with the URL could spend the whole
+  // 200,000-tokens-a-day allowance in an afternoon, and a previous agent did
+  // exactly that by accident while load-testing. Every agent's captions stop
+  // working when it runs out, and nothing tells them why.
+  //
+  // A RATE LIMIT, NOT A LOCK. Gating this on identity is the single most likely
+  // way to lock a paying agent out of their own app, because the screens that
+  // call it genuinely have no credential. So the limits below are set far above
+  // what a working agent does: preparing one listing costs a handful of calls,
+  // and a busy hour is nowhere near 40. If a real user ever meets this, the
+  // limit is wrong, not the user.
+  //
+  // Honest about what it is: the counter lives in this lambda's memory, so it is
+  // per-instance and forgotten on a cold start. A distributed caller gets a
+  // multiple of it. It turns "unlimited" into "expensive and slow", which is the
+  // difference between a bad afternoon and a dead product.
+  const MODEL_ACTIONS = new Set(['parse', 'content', 'plan', 'refine', 'cover', 'readlisting'])
+  if (MODEL_ACTIONS.has(action) && !hasIngestSecret(req)) {
+    const ip = clientIp(req)
+    // Vision costs the most per call, so it gets its own, tighter bucket on top
+    // of the shared one.
+    const limits = [{ key: `gen:${ip}`, limit: 40, windowMs: 60_000 }, { key: `gen1h:${ip}`, limit: 600, windowMs: 3_600_000 }]
+    if (action === 'cover' || action === 'readlisting') limits.push({ key: `genv:${ip}`, limit: 20, windowMs: 60_000 })
+    for (const l of limits) {
+      const rl = rateLimit(l.key, l)
+      if (!rl.ok) {
+        // src/lib/ai.js throws `data.error` up to the screen's toast, so this
+        // reaches the agent in words rather than dead-ending.
+        return send(res, 429, {
+          error: `The AI is being asked for too much at once — wait ${rl.retryAfter}s and try again.`,
+          retryAfter: rl.retryAfter,
+        })
+      }
+    }
+  }
 
   try {
     if (action === 'status') {

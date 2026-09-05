@@ -14,7 +14,7 @@ Return ONLY a JSON object — no markdown, no code fences, no commentary — wit
 {
   "listingType": "sale" | "rental",
   "price": number | null,            // in RM, digits only (e.g. "RM 450k" -> 450000, "2.5k/month" -> 2500)
-  "location": string | null,         // area/neighbourhood, Kuching-centric
+  "location": string | null,         // the area/neighbourhood the listing names, verbatim — never inferred
   "bedrooms": number | null,
   "bathrooms": number | null,
   "propertyType": one of "Terrace","Semi-D","Detached","Apartment","Condo","Shoplot","Land" or null,
@@ -121,7 +121,14 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
     `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,
     nameLine,
     priceLine,
-    listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
+    // The listing's own words for where it is, and nothing appended. This used to
+    // read `${listing.location}, Kuching, Sarawak` — so a Johor listing was handed
+    // to the model as "Johor Bahru, Kuching, Sarawak", stated in the FACTS block
+    // as if the agent had said it. A fact beats a style rule (measured), so the
+    // model wrote the town it was given. We know the area the agent named; we do
+    // not know the state, and a guess in the facts block is the one place a guess
+    // must never go.
+    listing.location && `Location: ${listing.location}`,
     // A word the agent has BANNED must never reach the model as a fact.
     // Edward's rule is "never call a condo an apartment"; his listing said only
     // "1 Bedroom Unit", the parser guessed propertyType "Apartment", and this
@@ -241,9 +248,9 @@ follow the template.
 `
     : ''
 
-  // "You write marketing copy" invited authoring. The job is to take a Kuching
-  // agent's own listing and present it better - an editor's job, not a writer's.
-  return `You are an expert property EDITOR for agents in Kuching, Sarawak. Agents send you their own listing; you republish it in their house format, sharper and better organised. You never add facts they did not give you, and you never drop the selling points they did.
+  // "You write marketing copy" invited authoring. The job is to take the agent's
+  // own listing and present it better - an editor's job, not a writer's.
+  return `You are an expert property EDITOR for property agents in Malaysia. Agents send you their own listing; you republish it in their house format, sharper and better organised. You never add facts they did not give you, and you never drop the selling points they did.
 
 ${rulesBlock}${styleFirst}LISTING FACTS:
 ${facts}${rawBlock}
@@ -310,7 +317,14 @@ export function buildReelPrompt(listing, styleGuide, rules) {
   const facts = [
     `Type: ${listing.listingType === 'rental' ? 'For rent (monthly)' : 'For sale'}`,
     listing.price != null && `Price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''}`,
-    listing.location && `Location: ${listing.location}, Kuching, Sarawak`,
+    // The listing's own words for where it is, and nothing appended. This used to
+    // read `${listing.location}, Kuching, Sarawak` — so a Johor listing was handed
+    // to the model as "Johor Bahru, Kuching, Sarawak", stated in the FACTS block
+    // as if the agent had said it. A fact beats a style rule (measured), so the
+    // model wrote the town it was given. We know the area the agent named; we do
+    // not know the state, and a guess in the facts block is the one place a guess
+    // must never go.
+    listing.location && `Location: ${listing.location}`,
     listing.propertyType && `Type: ${listing.propertyType}`,
     listing.bedrooms != null && `${listing.bedrooms} bedrooms`,
     listing.bathrooms != null && `${listing.bathrooms} bathrooms`,
@@ -318,7 +332,7 @@ export function buildReelPrompt(listing, styleGuide, rules) {
     listing.rawText && `Agent's message: ${String(listing.rawText).slice(0, 500)}`,
   ].filter(Boolean).join('\n')
 
-  return `Write a TikTok reel for this Kuching property. Return ONLY JSON: { "script": "...", "caption": "..." }
+  return `Write a TikTok reel for this property. Return ONLY JSON: { "script": "...", "caption": "..." }
 ${rulesBlock}${voiceBlock}
 
 LISTING:
@@ -362,13 +376,20 @@ export function buildPlanPrompt(brand, count, languageIds) {
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
   const langList = languages.map((l) => `"${l.id}" = ${l.native}`).join(', ')
   const who = brand?.agency || brand?.name || 'a property agent'
-  return `You are the social media manager for ${who}, a property agent in Kuching, Sarawak, Malaysia. Plan ${count} SHORT, engaging NON-LISTING posts that keep the feed active between property listings and build trust + enquiries.
+  // The agent's OWN market, when they have told us. This prompt used to say
+  // "Kuching, Sarawak" for everybody, which was true of the pilot agent and of
+  // nobody else — it would have had an agent in Penang posting about Batu Kawa
+  // and wishing their followers a happy Gawai. Unset, it stays national and asks
+  // for nothing it cannot know.
+  const region = String(brand?.region || '').trim()
+  const where = region ? `${region}, Malaysia` : 'Malaysia'
+  return `You are the social media manager for ${who}, a property agent in ${where}. Plan ${count} SHORT, engaging NON-LISTING posts that keep the feed active between property listings and build trust + enquiries.
 
 MIX these categories (vary them, avoid repeats):
-- market_tip: a genuine Kuching/Sarawak property insight (financing, MOT, legal fees, loan margin, timing)
+- market_tip: a genuine ${region || 'Malaysian'} property insight (financing, MOT, legal fees, loan margin, timing)
 - buyer_tip or seller_tip: one practical, true piece of advice
-- area_spotlight: a Kuching area worth living in (BDC, Batu Kawa, Green Heights, Samarahan, Petra Jaya…) and why
-- festive: a warm greeting for a relevant Malaysian/Sarawak occasion (CNY, Hari Raya, Deepavali, Gawai Dayak, Christmas, Merdeka)
+- area_spotlight: ${region ? `an area of ${region}` : 'an area in the agent\'s own market'} worth living in, and why — name ONLY areas you are certain are there, and if you are not certain of any, write a different category instead
+- festive: a warm greeting for a relevant Malaysian occasion (CNY, Hari Raya, Deepavali, Christmas, Merdeka), plus a state occasion ONLY if you are certain it applies where they work
 - engagement: a light question that invites comments
 - credibility: a soft "why work with a local agent" trust-builder (no fake numbers)
 

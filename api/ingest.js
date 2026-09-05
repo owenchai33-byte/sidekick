@@ -20,7 +20,8 @@ import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
 import { appendFeed } from './_lib/feed.js'
-import { putPending } from './_lib/pending.js'
+import { putPending, getPending } from './_lib/pending.js'
+import { sourceFrom } from './hold.js'
 import { getStyle, getRules } from './_lib/style.js'
 import { getBrand } from './_lib/brand.js'
 import { connectedAccounts, postToConnected, defaultProfile } from './_lib/social.js'
@@ -177,6 +178,15 @@ ${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it;
 // Kuching — RM1,300 a month" on TikTok while the same listing's FB/IG post was
 // correctly blocked. The FB caption path has said `degraded` since the Gemini 429s;
 // the reel is the same advert, under the same agent's name, and needs to say it too.
+// Hashtags for the fallback reel caption. #KuchingProperty and #Sarawak used to
+// be hardcoded here, so every agent's TikTok claimed Sarawak whatever the listing
+// said. Derived from the listing's own location instead, and when there is no
+// location the geographic tags are simply left off — a hashtag is a claim.
+function geoTags(loc) {
+  const slug = String(loc || '').replace(/[^a-z0-9]/gi, '')
+  return `${slug ? `#${slug}Property ` : ''}#PropertyMalaysia`
+}
+
 async function reelScript(listing, status, styleGuide, rules) {
   if (status.configured) {
     try {
@@ -185,11 +195,17 @@ async function reelScript(listing, status, styleGuide, rules) {
     } catch { /* fall through */ }
   }
   const money = listing.price != null ? `RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? ' a month' : ''}` : ''
-  const loc = listing.location || 'Kuching'
-  const script = `Looking for a place in ${loc}? This ${listing.propertyType || 'one'}${listing.bedrooms != null ? ` has ${listing.bedrooms} bedrooms` : ''}${money ? `, and it's ${money}` : ''}. Trust me, it won't last long. DM me now before it's gone.`
+  // NO SUBSTITUTE LOCATION. This used to fall back to 'Kuching', which put a town
+  // the listing never named into a spoken video and a TikTok caption — for a Miri,
+  // Sibu, Bintulu or Johor property, a false fact about a real address on a paying
+  // client's account. And there is no model on this path, so no repair round and
+  // no fact guard would ever have caught it. An omitted location reads as
+  // incomplete; a wrong one is a lie, and only one of those is recoverable.
+  const loc = String(listing.location || '').replace(/\s+/g, ' ').trim()
+  const script = `Looking for ${loc ? `a place in ${loc}` : 'a new place'}? This ${listing.propertyType || 'one'}${listing.bedrooms != null ? ` has ${listing.bedrooms} bedrooms` : ''}${money ? `, and it's ${money}` : ''}. Trust me, it won't last long. DM me now before it's gone.`
   return {
     script,
-    caption: `${listing.propertyType || 'Property'} in ${loc} ${money ? '— ' + money : ''} 🏡 #KuchingProperty #Sarawak #PropertyMalaysia`,
+    caption: `${listing.propertyType || 'Property'}${loc ? ` in ${loc}` : ''} ${money ? '— ' + money : ''} 🏡 ${geoTags(loc)}`,
     degraded: true,
     reason: status.configured
       ? 'the reel writer failed — this is the deterministic template script, not this agent\'s voice'
@@ -203,8 +219,10 @@ function shortCaption(listing) {
     ? `RM${Number(listing.price).toLocaleString('en-MY')}/mo`
     : `RM${Number(listing.price).toLocaleString('en-MY')}`)
   const type = listing.propertyType || (listing.listingType === 'rental' ? 'Rental' : 'Property')
-  const loc = listing.location || 'Kuching'
-  const s = `${type} @ ${loc}${money ? ` — ${money}` : ''}`
+  // Same rule as the reel above: never name a town the listing did not. This is
+  // the title TikTok actually publishes.
+  const loc = String(listing.location || '').replace(/\s+/g, ' ').trim()
+  const s = `${type}${loc ? ` @ ${loc}` : ''}${money ? ` — ${money}` : ''}`
   return s.length > 88 ? s.slice(0, 87) + '…' : s
 }
 
@@ -221,7 +239,23 @@ async function withBrandCard(media, listing, brand, enabled) {
       access: 'public', addRandomSuffix: true, contentType: 'image/png',
       token: process.env.BLOB_READ_WRITE_TOKEN,
     })
-    return { items: [{ url: blob.url, type: 'image' }, ...media], card: blob.url }
+    // THE CARD REPLACES THE PHOTO IT WAS MADE FROM — it does not sit in front of
+    // it. renderBrandCard takes a listing photo and draws the price panel ON it,
+    // so prepending the result to the full list published the same photo twice:
+    // once carded, once raw, side by side. Seen on Facebook 2026-09-05, the
+    // bedroom shot appearing as image 1 and image 2 of the album.
+    //
+    // `first` is whichever item the card was actually rendered from, which is
+    // not always index 0 — a video can come first — so it is removed by
+    // identity rather than by position.
+    return {
+      items: [{ url: blob.url, type: 'image' }, ...media.filter((m) => m !== first)],
+      card: blob.url,
+      // Remembered so a later cover change can put this photo back in the album
+      // instead of losing it: once it has been folded into a card, its raw URL
+      // is nowhere else on the record.
+      cardFrom: first.url,
+    }
   } catch (e) {
     return { items: media, cardError: e?.message || String(e) }
   }
@@ -241,9 +275,14 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     let accounts = []
     let zerr = null
-    if (key) { try { accounts = await connectedAccounts(key, profileId) } catch (e) { zerr = e.message } }
+    // connectedAccounts takes ONE argument (api/_lib/social.js). This passed the
+    // API key as the profile id, so the readiness check has been reporting the
+    // account count for a profile that does not exist — to the person deciding
+    // whether the system is safe to run. It also read a Zernio-era env var while
+    // production runs PostPeer, so `ready` was false on a working install.
+    if (profileId) { try { accounts = await connectedAccounts(profileId) } catch (e) { zerr = e.message } }
     return send(res, 200, {
-      ready: !!key && accounts.length > 0,
+      ready: !!profileId && accounts.length > 0,
       providerConfigured: status.configured,
       provider: status.provider,
       zernioKey: !!key,
@@ -257,6 +296,68 @@ export default async function handler(req, res) {
 
   let body
   try { body = req.body ?? (await readJson(req)) } catch { return send(res, 400, { error: 'Invalid JSON' }) }
+
+  // RECOVER — change WHICH PHOTO is the cover on a post already composed,
+  // without touching one word of the caption.
+  //
+  // THE HOLE THIS CLOSES. On 2026-09-05 Owen sent a photo captioned "this is the
+  // first photo". The agent answered "Got it — this will be the cover photo for
+  // the reel & posts", he said "post it lesgo", and the ORIGINAL cover went out
+  // on Facebook, Instagram and TikTok. The model had not disobeyed: the cover is
+  // positional (photo[0], see withBrandCard below), AGENTS.md said only "want a
+  // different cover? send it first", and there was no command that could change
+  // one afterwards. AGENTS.md even listed the cover under "what is trainable",
+  // which was simply untrue. So the model was told a capability existed, had no
+  // way to use it, and said yes — the same shape as the invented captions.
+  //
+  // THE CAPTION IS READ FROM THE STORED RECORD, NEVER FROM THE CALLER. That is
+  // deliberate: an endpoint that accepted a caption would be a way to hand-write
+  // one, which is the thing the whole guard chain exists to prevent. It also
+  // means an agent who spent four rounds tuning their caption keeps it.
+  if (body?.mode === 'recover') {
+    const id = String(body?.pendingId || '').trim()
+    if (!id) return send(res, 400, { ok: false, error: 'pendingId is required' })
+    const item = await getPending(id)
+    if (!item) return send(res, 404, { ok: false, error: 'that post is no longer waiting — it was published or skipped' })
+
+    const fresh = mediaFrom(body)
+    if (!fresh.length) return send(res, 400, { ok: false, error: 'a cover needs at least one photo' })
+
+    // Drop the card the previous composition prepended, or it would be carried
+    // along as an ordinary photo and the album would grow a stale price panel
+    // every time the cover changed.
+    const kept = (Array.isArray(item.mediaItems) ? item.mediaItems : [])
+      .filter((m) => m && m.url && m.url !== item.cover)
+    // The previous cover was folded INTO the old card, so its raw URL is on no
+    // other item. Put it back, or changing the cover would quietly delete a
+    // photo from the album.
+    if (item.cardFrom && !kept.some((m) => m.url === item.cardFrom)) {
+      kept.unshift({ url: item.cardFrom, type: 'image' })
+    }
+    const seen = new Set(fresh.map((m) => m.url))
+    const media = [...fresh, ...kept.filter((m) => !seen.has(m.url))].slice(0, 10)
+
+    // Only what renderBrandCard reads. The source is the listing the caption was
+    // written from, so the panel keeps saying what it always said.
+    const src = item.source || {}
+    const listing = {
+      price: src.price ?? item.price ?? null,
+      location: src.location ?? item.location ?? null,
+      listingType: src.listingType ?? item.listingType ?? null,
+      bedrooms: src.bedrooms ?? null, bathrooms: src.bathrooms ?? null, sqft: src.sqft ?? null,
+      propertyName: src.propertyName ?? null,
+    }
+    const brand = await getBrand(item.profileId).catch(() => ({}))
+    const { items, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, body?.card !== false)
+
+    await putPending({ ...item, mediaItems: items, mediaCount: items.length, cover: card || items[0]?.url || null, cardFrom: cardFrom || null }, id)
+    return send(res, 200, {
+      ok: true, mode: 'recover', pendingId: id,
+      cover: card || items[0]?.url || null, mediaCount: items.length,
+      caption: item.caption,
+      ...(cardError ? { cardError } : {}),
+    })
+  }
 
   const text = (body?.text || body?.caption || '').trim()
   const media = mediaFrom(body)
@@ -323,20 +424,44 @@ export default async function handler(req, res) {
         if (!retry.degraded && rv2.invented.length < rv.invented.length) rs = retry
       }
     }
-    // Hand the flag to the caller so it can pass it straight to /api/hold. Not a
-    // refusal here: the Mac still gets its script, and the ✅ is where a template
-    // is stopped. This flag is the ONLY signal — /api/hold deliberately does not
-    // sniff the text, because the version that tried refused 7 of 8 realistic
-    // short captions ("Studio in Kuching — RM650 a month" is a real TikTok title,
-    // not a template). A caller that drops captionDegraded gets a clean-looking
-    // pending, so the reel caller must forward it.
+    // THE HOLD BODY, ASSEMBLED HERE. The reel caller used to build its own /api/hold
+    // request out of this response, and it silently left two fields out of it:
+    // captionDegraded (so hold.js defaulted it to false and the ✅ saw a clean
+    // record) and the listing text (so approve.js had no source and its fact check
+    // returned nothing for every reel ever held). A TikTok reel therefore reached a
+    // paying client's account with the checks not weakened but entirely absent.
+    //
+    // Prose could not fix that: the comment that used to sit here TOLD the caller
+    // to forward the flag, and the caller did not. So the body is built on this
+    // side and handed over whole. The caller adds only what it alone knows — the
+    // rendered mp4 and the cover — and cannot drop a field it never had to copy.
+    // Callers that still assemble their own body keep working: every field below
+    // is also returned at the top level, exactly as before.
+    const holdBody = {
+      caption: rs.caption, script: rs.script, platforms: ['tiktok'],
+      profileId: postProfile,
+      // Assembled here for the same reason as everything else in this object:
+      // a caller that has to remember to copy a field is a caller that drops it.
+      // /api/approve can now be told who is approving, and a reel pending with
+      // no sender is one it can never check.
+      sender: meta.sender || null,
+      captionDegraded: !!rs.degraded,
+      ...(rs.degraded ? { captionDegradedReason: rs.reason } : {}),
+      // The agent's own message, so approve.js can measure the caption against it
+      // at the ✅ instead of trusting a flag. hold.js takes `sourceText`/`rawText`
+      // and deliberately not a bare `text`.
+      sourceText: listing.rawText || text || '',
+      price: listing.price ?? null, location: listing.location || null,
+      listingType: listing.listingType,
+    }
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
       captionDegraded: !!rs.degraded,
       ...(rs.degraded ? {
         captionDegradedReason: rs.reason,
-        captionWarning: `the reel writer failed — this is generic template copy, NOT this agent's voice. Do not publish it; pass captionDegraded:true to /api/hold.`,
+        captionWarning: `the reel writer failed — this is generic template copy, NOT this agent's voice. Do not publish it; POST the holdBody below to /api/hold and the ✅ will refuse it.`,
       } : {}),
+      holdBody,
       card: (await cardP).card || media[0]?.url || null, profileId: postProfile, brandApplied,
       listing: { price: listing.price ?? null, location: listing.location || null, bedrooms: listing.bedrooms ?? null, bathrooms: listing.bathrooms ?? null, sqft: listing.sqft ?? null, propertyType: listing.propertyType || null, listingType: listing.listingType },
     })
@@ -371,7 +496,7 @@ export default async function handler(req, res) {
   }
 
   // Render the branded cover + final media once (the approver sees the real thing).
-  const { items: mediaItems, card, cardError } = await withBrandCard(media, listing, brand, body?.card !== false)
+  const { items: mediaItems, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, body?.card !== false)
   const captionShort = shortCaption(listing) // ≤90 chars for TikTok photo posts
   const feedBase = {
     location: listing.location || null,
@@ -396,7 +521,7 @@ export default async function handler(req, res) {
     }
     const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
-    await appendFeed({ ...feedBase, at: new Date().toISOString(), platforms: r.platforms, mediaCount: mediaItems.length })
+    await appendFeed({ ...feedBase, at: new Date().toISOString(), profileId: postProfile, platforms: r.platforms, mediaCount: mediaItems.length })
     return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
   }
 
@@ -419,6 +544,16 @@ export default async function handler(req, res) {
       // /api/hold now writes.
       captionDegraded,
       captionDegradedReason: captionDegraded ? captionDegradedReason : null,
+      // The agent's own message, stored the same way /api/hold stores it, so the
+      // ✅ can measure this caption against the listing instead of only trusting
+      // the flag above. Until now only the reel path could be re-checked at the
+      // tick; the review path — the one nearly every post takes — was written,
+      // repaired and then published on trust. The write-path check has repair
+      // rounds this does not, so this is a second reading of the same evidence,
+      // not a replacement for it.
+      source: sourceFrom({ sourceText: listing.rawText || text || '', listing }),
+      // The photo the price card was drawn on, so a later cover change can restore it.
+      cardFrom: cardFrom || null,
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,

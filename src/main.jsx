@@ -3,7 +3,18 @@ import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import { AppProvider } from './context/AppContext.jsx'
+import { captureProfileFromUrl } from './lib/tenant.js'
 import './styles/global.css'
+
+// Remember which agent this device belongs to, BEFORE the first render.
+//
+// The per-agent link is `…/#/connect?profile=<id>`, and AppShell navigates with
+// bare paths — so the query was lost on the first nav tap and every screen but
+// two was tenant-blind. Captured once here, it survives navigation, refreshes
+// and the return trip from the OAuth redirect, which is what lets the feed and
+// the posting buttons ask for this agent's data instead of everybody's.
+captureProfileFromUrl()
+window.addEventListener('hashchange', captureProfileFromUrl)
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

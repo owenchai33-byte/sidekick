@@ -31,18 +31,18 @@ async function versions(profileId, t) {
 
 export async function getBrand(profileId) {
   const t = tok()
-  if (!t || !profileId) return { color: '', name: '' }
+  if (!t || !profileId) return { color: '', name: '', region: '' }
   try {
     const v = await versions(profileId, t)
-    if (!v.length) return { color: '', name: '' }
+    if (!v.length) return { color: '', name: '', region: '' }
     const r = await fetch(v[0].url, { cache: 'no-store' })
-    if (!r.ok) return { color: '', name: '' }
+    if (!r.ok) return { color: '', name: '', region: '' }
     const j = await r.json()
-    return { color: j.color || '', name: j.name || '' }
-  } catch { return { color: '', name: '' } }
+    return { color: j.color || '', name: j.name || '', region: j.region || '' }
+  } catch { return { color: '', name: '', region: '' } }
 }
 
-export async function saveBrand(profileId, { color, name }) {
+export async function saveBrand(profileId, { color, name, region }) {
   const t = tok()
   if (!t) throw new Error('no BLOB token')
   if (!profileId) throw new Error('profile required')
@@ -56,6 +56,11 @@ export async function saveBrand(profileId, { color, name }) {
   const data = {
     color: nextColor,
     name: name !== undefined ? String(name || '').trim().slice(0, 60) : cur.name,
+    // Where this agent actually works, in their own words ("Kuching, Sarawak",
+    // "Johor Bahru", "Klang Valley"). Only the content-plan prompt reads it, and
+    // only to talk about THEIR market instead of the pilot agent's. It is never
+    // attached to a listing: a listing's location comes from the listing.
+    region: region !== undefined ? String(region || '').trim().slice(0, 60) : cur.region,
     updatedAt: new Date().toISOString(),
   }
   const blob = await put(`${PREFIX}${profileId}.json`, JSON.stringify(data), {

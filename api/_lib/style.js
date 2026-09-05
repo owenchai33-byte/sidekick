@@ -9,6 +9,9 @@ import { put, list, del } from '@vercel/blob'
 
 const PREFIX = 'style/'
 const tok = () => process.env.BLOB_READ_WRITE_TOKEN
+// How many versions of a style/rule set survive a write. Reads always take the
+// newest; the rest exist so an unauthenticated overwrite is recoverable.
+const KEEP_VERSIONS = 3
 
 async function versions(profileId, t) {
   const { blobs } = await list({ prefix: `${PREFIX}${profileId}`, token: t, limit: 25 })
@@ -44,9 +47,18 @@ export async function saveStyle(profileId, { style, examples }) {
   const blob = await put(`${PREFIX}${profileId}.json`, JSON.stringify(data), {
     access: 'public', token: t, contentType: 'application/json', addRandomSuffix: true,
   })
-  // Prune older versions so only the newest remains.
+  // Prune, but KEEP THE LAST FEW.
+  //
+  // This used to delete everything but the newest, which made a write final.
+  // /api/style has no authentication and cannot be given any today (the reasons
+  // are written out in api/style.js), so the realistic failure — a wipe of an
+  // agent's trained voice, whether by a stranger with their profileId or by a
+  // caller sending `style` when it meant to send only `examples` — was
+  // irreversible. Reads take versions[0], so the older blobs cost a few KB and
+  // change nothing about behaviour; they are there so the answer to "their style
+  // is gone" is a restore instead of retraining from memory.
   try {
-    const stale = (await versions(profileId, t)).filter((b) => b.url !== blob.url)
+    const stale = (await versions(profileId, t)).filter((b) => b.url !== blob.url).slice(KEEP_VERSIONS - 1)
     if (stale.length) await del(stale.map((b) => b.url), { token: t })
   } catch { /* ignore prune failures */ }
   return data
@@ -111,8 +123,11 @@ export async function saveRule(profileId, { rule, replace }) {
   const blob = await put(`${RULES_PREFIX}${profileId}.json`, JSON.stringify(data), {
     access: 'public', token: t, contentType: 'application/json', addRandomSuffix: true,
   })
+  // Same as saveStyle: keep the previous few, so `replace: []` from a stranger
+  // (or from a caller that meant to append) is not the end of everything an
+  // agent has taught this system.
   try {
-    const stale = (await ruleVersions(profileId, t)).filter((b) => b.url !== blob.url)
+    const stale = (await ruleVersions(profileId, t)).filter((b) => b.url !== blob.url).slice(KEEP_VERSIONS - 1)
     if (stale.length) await del(stale.map((b) => b.url), { token: t })
   } catch { /* ignore prune failures */ }
   return data

@@ -6,6 +6,7 @@ import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
 import { listingPhotos, coverPhoto } from '../lib/photos.js'
 import { captionFor } from '../lib/social.js'
+import { tenantFields } from '../lib/tenant.js'
 import { MARKET_STATUSES, isHighlightStatus } from '../lib/marketStatus.js'
 import { getVideoBlob } from '../lib/media.js'
 import { uploadMedia } from '../lib/upload.js'
@@ -100,7 +101,10 @@ export default function ListingDetailPage() {
       }
       const res = await fetch('/api/social-broadcast', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ caption, mediaUrl, mediaType, scheduledFor }),
+        // Whose accounts. This sent no profile, so the server fell back to a
+        // default — nobody's in production (a 502 and a "Post failed" toast),
+        // and one shared tenant's if anyone ever set one.
+        body: JSON.stringify({ caption, mediaUrl, mediaType, scheduledFor, ...tenantFields() }),
       })
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || 'Post failed')

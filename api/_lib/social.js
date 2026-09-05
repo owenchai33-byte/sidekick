@@ -31,9 +31,18 @@ import { postFingerprint, claimPostOnce, releasePostOnce, looksLikeDemoCaption }
 const ZERNIO = 'https://zernio.com/api/v1'
 const POSTPEER = 'https://api.postpeer.dev/v1'
 
-// Zernio's original pilot profile. Kept as the fallback so nothing changes for
-// existing Zernio traffic; PostPeer gets its own via POSTPEER_PROFILE_ID.
-export const DEFAULT_PROFILE = '6a6c498971a67c109cfcae06'
+// THERE IS NO DEFAULT PROFILE, and this comment is where the old one was.
+//
+// A real Zernio profile id used to sit here as the fallback for
+// `ZERNIO_PROFILE_ID || DEFAULT_PROFILE`. Production was safe only by accident:
+// it runs PostPeer, whose branch returns '' instead. So the obvious fix for the
+// home screen's red "No accounts — connect" badge — set POSTPEER_PROFILE_ID —
+// silently re-armed cross-tenant publishing, because every unmapped sender then
+// resolves to one shared profile and posts to whoever owns it.
+//
+// The badge is fixed where it broke instead (api/feed.js asks about the profile
+// the caller named). An unmapped sender now resolves to nothing, and every
+// caller below refuses rather than guessing.
 
 export function provider() {
   return (process.env.POSTING_PROVIDER || 'zernio').toLowerCase() === 'postpeer' ? 'postpeer' : 'zernio'
@@ -47,11 +56,16 @@ function authHeaders() {
     ? { 'x-access-key': key }
     : { authorization: `Bearer ${key}` }
 }
-/** The profile to use when the caller didn't name one. */
+/**
+ * The profile to use when the caller didn't name one — '' when there isn't one.
+ *
+ * '' is the honest answer, not a bug to be patched with a constant. Callers must
+ * treat it as "I do not know whose accounts these would be" and refuse.
+ */
 export function defaultProfile() {
   return provider() === 'postpeer'
     ? process.env.POSTPEER_PROFILE_ID || ''
-    : process.env.ZERNIO_PROFILE_ID || DEFAULT_PROFILE
+    : process.env.ZERNIO_PROFILE_ID || ''
 }
 /** For /api/feed's status panel — is the current provider usable? */
 export function providerConfigured() {
@@ -102,8 +116,13 @@ export async function connectedAccounts(profileId) {
   // silently return ANOTHER TENANT'S accounts — which meant postToConnected
   // would have published one agent's listing to every agent's socials. There is
   // no safe default here: each agent's profile comes from tools/tenants.json.
-  if (provider() === 'postpeer' && !pid) {
-    throw new Error('no profile for this sender — add their phone → profileId in tools/tenants.json (or set POSTPEER_PROFILE_ID)')
+  // Both providers, not just PostPeer. Zernio used to be exempt because a
+  // hardcoded pilot profile stood behind it, so an unresolved profile listed
+  // somebody's real accounts instead of refusing. With the constant gone, an
+  // empty pid would have gone to `/accounts?profileId=` — which is the same
+  // "every account in the project" answer, one provider along.
+  if (!pid) {
+    throw new Error('no profile for this sender — add their phone → profileId in tools/tenants.json')
   }
   if (provider() === 'postpeer') {
     const qs = new URLSearchParams({ limit: '100', profileId: pid })
@@ -129,6 +148,12 @@ export async function connectedAccounts(profileId) {
 export async function connectUrl({ platform, profileId, redirectUrl }) {
   if (!apiKey()) throw new Error(missingKey())
   const pid = profileId || defaultProfile()
+  // An OAuth started with no profile attaches the agent's own Facebook Page to
+  // whatever the provider considers "no profile" — shared with every other
+  // tenant. ~/.openclaw/tools/connection-watch.mjs documents this as the reason
+  // its recovery link must always carry ?profile=; the refusal belongs here too,
+  // where it cannot be forgotten by a caller.
+  if (!pid) throw new Error('no profile for this connect — open your own SideKick link (it carries ?profile=)')
   if (provider() === 'postpeer') {
     const qs = new URLSearchParams()
     if (pid) qs.set('profileId', pid)

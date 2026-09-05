@@ -48,6 +48,7 @@ const mkReq = (method, url, body) => ({
   },
 })
 const post = async (body) => { const res = mkRes(); await handler(mkReq('POST', '/api/style', body), res); return res }
+const { resetRateLimits } = await import('./tenant.js')
 const get = async (qs) => { const res = mkRes(); await handler(mkReq('GET', `/api/style?${qs}`), res); return res }
 
 // If ./style.js is ever NOT mocked, the real one runs and talks to Vercel Blob,
@@ -57,6 +58,7 @@ const get = async (qs) => { const res = mkRes(); await handler(mkReq('GET', `/ap
 beforeEach(() => {
   store.clear()
   vi.clearAllMocks()
+  resetRateLimits()
   vi.stubGlobal('fetch', vi.fn(async (url) => {
     throw new Error(`style-api test tried to reach the network (${String(url).slice(0, 60)}) — ./style.js is not mocked`)
   }))
@@ -108,5 +110,75 @@ describe('the sibling branches still work', () => {
     await post({ profile: 'a1', style: 'House format: price first.' })
     await post({ profile: 'a1', kind: 'rules', rule: 'No emoji' })
     expect((await get('profile=a1')).body.style).toBe('House format: price first.')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHO MAY WRITE HERE: still everybody, and that is a decision, not an oversight.
+//
+// Four of this route's seven writers are not browsers and send no credential,
+// and all four live outside this repo (sidekick.mjs setstyle/setbrand,
+// rule-sweeper.mjs's 10-minute cron, onboard-agent.sh's style migration). Any
+// gate takes one of them away silently — the agent's `setstyle` answers "saved"
+// and nothing is written, which is the exact failure this file was created for.
+// So the tests below pin the callers open, and the mitigations are the ones that
+// cannot refuse anyone: a rate limit far above real volume, and a style history
+// deep enough that a wipe is recoverable (see style-recovery.test.mjs).
+describe('/api/style: every real writer still gets through', () => {
+  it('sidekick.mjs setstyle — plain node fetch, no credential', async () => {
+    const res = await post({ profile: 'p1', style: 'short and punchy' })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('sidekick.mjs setbrand — plain node fetch, no credential', async () => {
+    const res = await post({ profile: 'p1', kind: 'brand', color: '#123456', name: 'TRR' })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('sidekick.mjs remember — the one caller that does send the secret', async () => {
+    const res = await post({ profile: 'p1', kind: 'rules', rule: 'always use the first photo' })
+    expect(res.statusCode).toBe(200)
+    expect(res.body.rules).toContain('always use the first photo')
+  })
+
+  it('rule-sweeper.mjs — the 10-minute rule-recovery cron, no credential', async () => {
+    const res = await post({ profile: 'p1', kind: 'rules', rules: ['a', 'b'] })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('onboard-agent.sh — migrating a real trained style, no credential', async () => {
+    const res = await post({ profile: 'p2', style: 'migrated', examples: ['one'] })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('StylePage.jsx — the browser, which also has no credential', async () => {
+    const res = await post({ profile: 'p3', style: 'from the app', examples: ['x'] })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('and every reader: getstyle, getbrand, rules, selftest, rule-sweeper', async () => {
+    expect((await get('profile=p1')).statusCode).toBe(200)
+    expect((await get('profile=p1&kind=brand')).statusCode).toBe(200)
+    expect((await get('profile=p1&kind=rules')).statusCode).toBe(200)
+  })
+})
+
+describe('/api/style: the rate limit is above every real writer', () => {
+  it('lets an agent save their style over and over', async () => {
+    for (let i = 0; i < 15; i++) {
+      expect((await post({ profile: 'p1', style: `v${i}` })).statusCode).toBe(200)
+    }
+  })
+
+  it('but stops a script walking profileIds', async () => {
+    let last
+    for (let i = 0; i < 25; i++) last = await post({ profile: `victim-${i}`, style: 'wiped' })
+    expect(last.statusCode).toBe(429)
+  })
+
+  it('reads are limited far more loosely — the crons poll them', async () => {
+    for (let i = 0; i < 100; i++) {
+      expect((await get('profile=p1&kind=rules')).statusCode).toBe(200)
+    }
   })
 })

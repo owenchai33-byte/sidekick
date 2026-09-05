@@ -35,7 +35,12 @@ export async function renderBrandCard(photoUrl, listing, brand = {}) {
   const accent = brand.color || process.env.BRAND_COLOR || GREEN
   const brandName = (brand.name || process.env.BRAND_NAME || '').trim()
   const tag = listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE'
-  const loc = listing.location || 'Kuching'
+  // NEVER SUBSTITUTE A LOCATION. This said `|| 'Kuching'`, so a Miri, Sibu or
+  // Johor property had a Kuching address BURNED INTO THE IMAGE — the one place a
+  // wrong fact cannot be edited or repaired afterwards, and produced with no
+  // model in the loop, so no caption guard would ever have seen it. An omitted
+  // line reads as a plain photo; a wrong one is a lie about a real address.
+  const loc = String(listing.location || '').trim()
   const specs = specLine(listing)
 
   const tree = h('div', { style: { position: 'relative', width: 1080, height: 1080, display: 'flex', backgroundColor: '#0f1a14', fontFamily: 'Inter' } },
@@ -45,7 +50,7 @@ export async function renderBrandCard(photoUrl, listing, brand = {}) {
       h('span', { style: { fontSize: 30, fontWeight: 800, color: '#ffffff', letterSpacing: 3 } }, tag),
     ),
     h('div', { style: { position: 'absolute', left: 56, right: 56, bottom: 68, display: 'flex', flexDirection: 'column' } },
-      h('span', { style: { fontSize: 46, fontWeight: 700, color: '#ffffff' } }, loc),
+      loc ? h('span', { style: { fontSize: 46, fontWeight: 700, color: '#ffffff' } }, loc) : null,
       h('span', { style: { fontSize: 104, fontWeight: 800, color: '#ffffff', lineHeight: 1.05, marginTop: 4 } }, money(listing)),
       specs ? h('span', { style: { fontSize: 34, fontWeight: 700, color: 'rgba(255,255,255,0.9)', marginTop: 16 } }, specs) : null,
       brandName ? h('div', { style: { display: 'flex', marginTop: 28 } },

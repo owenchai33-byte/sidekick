@@ -141,6 +141,15 @@ const MATERIAL_CLAIMS = [
   [/leasehold/i, /leasehold/i],
   [/(stunning|sea|city|river|mountain|panoramic) view/i, /view/i],
   [/corner (lot|unit)/i, /corner/i],
+  // Added 2026-09-05. Title and lot status are LEGALLY material in Malaysia -
+  // a bumi lot a non-bumi buyer cannot purchase, or an individual title a
+  // strata property does not have, is a claim with consequences past marketing.
+  [/individual title|geran individu|hakmilik individu/i, /individual\s*title|geran|hakmilik|个别地契|個別地契/i],
+  [/strata title|hakmilik strata/i, /strata|分层地契|分層地契/i],
+  [/master title|hakmilik induk/i, /master\s*title|induk|母地契/i],
+  [/\bnon[- ]?bumi\b|bukan\s*bumi/i, /bumi|non[- ]?bumi|bukan\s*bumi/i],
+  [/(?<!non[- ])(?<!bukan\s)\bbumi\s*(?:lot|unit)\b|lot\s*bumi/i, /bumi/i],
+  [/malay reserve|rizab melayu|tanah rizab/i, /reserve|rizab/i],
 ]
 
 // A contact line is not a property name. "Call Jason 0128887766" and "Hubungi
@@ -360,13 +369,35 @@ function matchesKnown(v, known) {
 // Room counts. Compared against the PARSED fields, which the parser has already
 // normalised across "2 Bed", "2 bilik tidur" and "2房" - never against rawText,
 // where a bare regex would read "3 storey" or "2+1" as a bedroom count.
-const BED_STATED = /(\d+)\s*[-–]?\s*(?:bedrooms?|bed\b|beds\b|rooms?\b|bilik\s+tidur|bilik(?!\s*(?:air|mandi))\b|房(?:间|間)?|室)/gi
-const BATH_STATED = /(\d+)\s*[-–]?\s*(?:bathrooms?|baths?\b|toilets?|washrooms?|bilik\s+(?:air|mandi)|tandas|厕(?:所)?|浴室?|卫(?:生间|浴)?)/gi
+// Shared by the room-count rule below and the lease-term rule further down.
+const CJK_NUM = { 一: 1, 二: 2, 两: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+
+// A COUNT IS A COUNT IN ANY SCRIPT.
+//
+// These read ASCII digits only, which is a hole with the shape of the product:
+// SideKick's selling point is writing the caption in a DIFFERENT language from
+// the listing, and every non-digit form was therefore invisible. Measured
+// against a 2-bed listing: "4 bedrooms" was caught, while "Three bedrooms",
+// "Empat bilik tidur", "四房两厕" and "3BR unit" all published clean.
+//
+// CJK_NUM already existed further down this file for lease terms and was not
+// reused here. Now one number vocabulary serves both.
+const WORD_NUM = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  satu: 1, dua: 2, tiga: 3, empat: 4, lima: 5, enam: 6, tujuh: 7, lapan: 8, delapan: 8, sembilan: 9, sepuluh: 10,
+}
+const NUM_WORDS = Object.keys(WORD_NUM).join('|')
+const NUM_TOKEN = `(\\d+|${NUM_WORDS}|[一二两兩三四五六七八九十])`
+
+// `br` covers the "3BR" shorthand; `\b` keeps it off "brick" and "Brunei".
+const BED_STATED = new RegExp(`${NUM_TOKEN}\\s*[-–]?\\s*(?:bedrooms?|bed\\b|beds\\b|br\\b|rooms?\\b|bilik\\s+tidur|bilik(?!\\s*(?:air|mandi))\\b|房(?:间|間)?|室)`, 'gi')
+const BATH_STATED = new RegExp(`${NUM_TOKEN}\\s*[-–]?\\s*(?:bathrooms?|baths?\\b|toilets?|washrooms?|bilik\\s+(?:air|mandi)|tandas|厕(?:所)?|浴室?|卫(?:生间|浴)?)`, 'gi')
 
 function statedCounts(text, re) {
   const out = new Set()
   for (const m of String(text || '').matchAll(re)) {
-    const n = Number(m[1])
+    const raw = String(m[1] || '').toLowerCase()
+    const n = /^\d+$/.test(raw) ? Number(raw) : (WORD_NUM[raw] ?? CJK_NUM[m[1]] ?? NaN)
     if (Number.isFinite(n)) out.add(n)
   }
   return out
@@ -521,7 +552,6 @@ const yieldKnown = (v, known) => known.some((k) => Math.abs(k - v) <= 0.3)
 // And it reads all three languages now. The English-only version refused honest
 // English while letting "Kontrak 2 tahun" and "两年租约" through unchecked, which
 // is the worst of both.
-const CJK_NUM = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
 const numOf = (raw) => {
   const t = String(raw || '').trim()
   if (/^\d+$/.test(t)) return Number(t)
@@ -605,6 +635,17 @@ const FACILITY_CLAIMS = [
   ['clubhouse', /\bclub\s?house\b|会所|會所|rumah\s*kelab/i, /club\s?house|会所|會所|俱乐部|kelab/i],
   ['lift', /\b(?:lift|elevator)\b|电梯|電梯|升降机|\blif\b/i, /lift|elevator|电梯|電梯|升降|\blif\b/i],
   ['parking', /\bcar\s?park(?:ing)?\b|\bparking\b|车位|車位|停车|停車|tempat\s*letak\s*kereta/i, /car\s?park|parking|garage|porch|车位|車位|停车|停車|泊车|letak\s*kereta|parkir/i],
+  // Added 2026-09-05. Each of these published clean against a one-line room ad
+  // that promised none of them. Same shape as the entries above: a claim regex
+  // and a deliberately WIDE grounds regex, because widening grounds can only
+  // make this guard more permissive.
+  ['air-conditioning', /\bair[\s-]?con(?:d|ditioning|ditioner)?\b|\ba\/c\b|冷气|冷氣|空调|空調|penghawa\s*dingin|pendingin/i, /air[\s-]?con|a\/c|aircond|冷气|冷氣|空调|空調|penghawa|pendingin|hawa\s*dingin/i],
+  ['water heater', /\bwater\s*heater\b|\bheater\b|热水器|熱水器|pemanas\s*air/i, /heater|热水|熱水|pemanas|water\s*heat/i],
+  ['kitchen cabinets', /\bkitchen\s*cabinets?\b|\bcabinetry\b|橱柜|櫥櫃|kabinet\s*dapur/i, /cabinet|kabinet|橱柜|櫥櫃|kitchen\s*fitted|dapur\s*siap/i],
+  ['rooftop deck', /\broof\s?top\s*(?:deck|garden|terrace|lounge|pool)\b|\bsky\s*(?:deck|garden|lounge)\b|天台|空中花园|空中花園/i, /roof\s?top|sky\s*(?:deck|garden|lounge)|天台|空中花园|空中花園|bumbung/i],
+  ['sauna', /\bsauna\b|\bsteam\s*room\b|桑拿|蒸氣室|蒸汽室/i, /sauna|steam\s*room|桑拿|蒸氣|蒸汽/i],
+  ['BBQ area', /\bbbq\b|\bbarbe?cue\b|烧烤|燒烤|kawasan\s*bbq/i, /bbq|barbe?cue|烧烤|燒烤/i],
+  ['covered parking', /\bcovered\s*(?:car\s*)?(?:bay|park(?:ing)?|porch)\b|有盖车位|有蓋車位|tempat\s*letak\s*kereta\s*berbumbung/i, /covered|porch|garage|sheltered|有盖|有蓋|berbumbung|bumbung|car\s?park|parking|车位|車位/i],
 ]
 
 /**
@@ -621,11 +662,41 @@ export function captionViolations(caption, listing) {
   const missing = [], invented = [], warnings = []
 
   // -- MISSING ---------------------------------------------------------------
-  // every distinct money amount the listing states (RM338,000 / RM1,300 / RM15,600 / RM100K)
-  for (const m of new Set([...src.matchAll(/rm\s?([\d,]+(?:\.\d+)?\s*k?)/gi)].map((x) => x[1].replace(/\s/g, '').toLowerCase()))) {
-    const canon = m.endsWith('k') ? String(parseFloat(m) * 1000) : m.replace(/,/g, '')
-    const inCap = capLow.includes(m) || cap.replace(/,/g, '').includes(canon)
-    if (!inCap) missing.push(`RM${m.toUpperCase()}`)
+  // THE SAME PRICE, SPELLED TWO WAYS, IS NOT A MISSING PRICE.
+  //
+  // This walk canonicalised the SOURCE side only: a listing saying RM338,000
+  // looked for the literal "338,000" or "338000" in the caption. A caption
+  // writing that price the way agents actually write it — "RM338k" — matched
+  // neither, landed in `missing`, and `missing` beginning with RM is what blocks
+  // at ingest.js and marks the caption degraded. So the guard refused a caption
+  // that was perfectly correct, silently, and the repair loop then chased a
+  // figure that was already on the page.
+  //
+  // knownAmounts() has parsed k / juta / jt / mil / million / 万 / 萬 correctly
+  // all along (see amountOf above); this walk simply never used it. Now the
+  // caption's own figures are canonicalised through the same parser and checked
+  // first.
+  //
+  // NOTE THE DIRECTION. This is an extra way to ACCEPT, added in front of the
+  // two literal tests, which are untouched. It can only ever shrink `missing`,
+  // never grow it — so no caption that published before can start refusing
+  // because of this change.
+  const capValues = new Set()
+  {
+    const add = (v) => { if (Number.isFinite(v) && v > 0) capValues.add(v) }
+    for (const m of cap.matchAll(RM_AMOUNT)) add(amountOf(m[1], m[2]))
+    for (const m of cap.matchAll(BARE_AMOUNT)) {
+      // a bare one- or two-digit number is a bedroom count or a floor, not a price
+      if (!m[2] && m[1].replace(/[,.].*$/, '').length < 3) continue
+      add(amountOf(m[1], m[2]))
+    }
+  }
+  for (const raw of new Set([...src.matchAll(/rm\s?([\d,]+(?:\.\d+)?\s*k?)/gi)].map((x) => x[1].replace(/\s/g, '').toLowerCase()))) {
+    const canon = raw.endsWith('k') ? String(parseFloat(raw) * 1000) : raw.replace(/,/g, '')
+    const asNumber = Number(canon)
+    const sameMoney = Number.isFinite(asNumber) && asNumber > 0 && capValues.has(asNumber)
+    const inCap = sameMoney || capLow.includes(raw) || cap.replace(/,/g, '').includes(canon)
+    if (!inCap) missing.push(`RM${raw.toUpperCase()}`)
   }
   const sq = src.match(/([\d,]+)\s*(?:sq\s?ft|sqft|square feet)/i)
   if (sq && !cap.replace(/,/g, '').includes(sq[1].replace(/,/g, ''))) missing.push(`${sq[1]} sqft`)
@@ -666,6 +737,50 @@ export function captionViolations(caption, listing) {
     if (nameFrom === 'parser') missing.push(`property name "${propName}"`)
     else warnings.push(`possible property name "${propName}" (heuristic guess, not from the parser)`)
   }
+
+  // --- WARNINGS, NOT REFUSALS ------------------------------------------------
+  //
+  // Both rules below catch real inventions and neither may block, because
+  // neither can tell a genuine claim from a coincidence often enough to be
+  // trusted with a silent, total refusal. A blocker that is right 70% of the
+  // time refuses a real listing three times in ten; a warning that is right 70%
+  // of the time still reaches the repair round, which is where a model can look
+  // at it and decide. That is the whole difference.
+
+  // A PLACE THE LISTING NEVER NAMED. Only the "N mins to X" shape was checked,
+  // so "Walking distance to Vivacity Megamall and SJK Chung Hua", "Near Kuching
+  // International Airport" and a street the listing never gave all published
+  // clean — and a location perk is exactly the line a model reaches for when it
+  // wants one more bullet.
+  //
+  // It warns rather than blocks because the boundary of a place name is genuinely
+  // ambiguous: "near the market" is not a claim about a named landmark, and an
+  // area the parser already stored is not an invention at all.
+  const NEARBY = /\b(?:walking distance (?:to|from)|next to|opposite|beside|adjacent to|near(?:by| to)?|steps (?:to|from)|a short (?:walk|drive) (?:to|from))\s+([^\n,.;!?]{3,40})/gi
+  const known_places = `${srcLow} ${String(listing?.location || '').toLowerCase()} ${String(listing?.propertyName || '').toLowerCase()}`
+  for (const m of cap.matchAll(NEARBY)) {
+    const place = m[1].trim().replace(/\s+/g, ' ')
+    // A place with no capitalised word is a description ("the market", "shops"),
+    // not a named landmark, and naming one is what makes this a factual claim.
+    if (!/[A-Z\u4e00-\u9fff]/.test(place)) continue
+    const head = place.toLowerCase().split(/\s+/).filter((w) => w.length > 3).slice(0, 2)
+    if (!head.length || head.some((w) => known_places.includes(w))) continue
+    warnings.push(`"${place}" — the listing never mentions it`)
+  }
+
+  // AN INVENTED BUILDING OR DEVELOPER. carriesName only ever checked that the
+  // real name is PRESENT, never that a second one is absent, so "by Ibraco
+  // Berhad" or "Sunway Vivaldi @ Tropics City" attached a company to a property
+  // that never named one. The developer suffixes make this narrow enough to be
+  // worth saying out loud, and vague enough that it must not refuse a post.
+  const DEVELOPER = /\bby\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3}?\s+(?:Berhad|Bhd|Sdn\s*Bhd|Group|Development(?:s)?|Properties|Holdings|Corporation|Corp))\b/g
+  for (const m of cap.matchAll(DEVELOPER)) {
+    const dev = m[1].trim()
+    const firstWord = dev.split(/\s+/)[0].toLowerCase()
+    if (srcLow.includes(firstWord)) continue
+    warnings.push(`developer "${dev}" — the listing never names one`)
+  }
+
 
   // -- INVENTED --------------------------------------------------------------
   const known = `${srcLow} ${String(listing?.furnishing || '').toLowerCase()} ${String(listing?.tenure || '').toLowerCase()}`

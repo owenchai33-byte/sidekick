@@ -1,13 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { getProfile } from '../lib/tenant.js'
 
 // Per-agent link: `…/#/style?profile=<id>`. HashRouter keeps the query in the
-// hash, so read it from there (same as the Connect page).
-function readProfile() {
-  const h = window.location.hash || ''
-  const i = h.indexOf('?')
-  return i === -1 ? '' : (new URLSearchParams(h.slice(i + 1)).get('profile') || '')
-}
+// hash, so it is read from there — and remembered (src/lib/tenant.js), so an
+// agent who taps away and back does not land on "open this from your personal
+// link" with their trained style apparently gone.
+const readProfile = getProfile
 
 const PLACEHOLDER = `e.g.
 - Keep it short and punchy — 3 short lines max.

@@ -3,7 +3,7 @@
 // their OWN Facebook/Instagram/TikTok on the provider's audited app, so there's
 // no Meta/TikTok dev app or audit on our side.
 //   GET /api/social-connect?platform=facebook|instagram|tiktok&origin=<app origin>
-import { connectUrl, defaultProfile, providerConfigured } from './_lib/social.js'
+import { connectUrl, providerConfigured } from './_lib/social.js'
 
 const PLATFORMS = ['facebook', 'instagram', 'tiktok']
 
@@ -22,8 +22,19 @@ export default async function handler(req, res) {
   const origin = q.get('origin') || ''
   if (!PLATFORMS.includes(platform)) return send(res, 400, { error: 'platform must be one of: ' + PLATFORMS.join(', ') })
 
-  // Per-agent: connect to the profile in the link (?profile=…); else the default.
-  const profileId = q.get('profile') || defaultProfile()
+  // Per-agent: connect to the profile in the link (?profile=…). THERE IS NO
+  // "else the default" any more. An OAuth started with no profile attaches the
+  // agent's own Facebook Page to whatever the provider treats as no profile —
+  // shared with every other tenant — and the agent has no way to see that it
+  // happened. ~/.openclaw/tools/connection-watch.mjs already documents this as
+  // the reason its recovery link must always carry ?profile=.
+  //
+  // Only caller: src/pages/ConnectPage.jsx, which sends the profile from the
+  // link (or the one this browser stored the first time the link was opened).
+  const profileId = (q.get('profile') || '').trim()
+  if (!profileId) {
+    return send(res, 400, { error: 'Open your own SideKick link to connect — it carries the ?profile= that keeps your accounts yours.' })
+  }
   // Send the agent back to THEIR profile's connect page after authorizing.
   const redirectUrl = origin ? `${origin}/#/connect?profile=${profileId}` : ''
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { renderTextCard, loadImage } from '../lib/graphics.js'
 import { uploadMedia } from '../lib/upload.js'
+import { tenantFields } from '../lib/tenant.js'
 
 // One AI-planned content post: a real branded graphic + caption + Approve +
 // Auto-post (to the agent's connected accounts) with an optional schedule.
@@ -34,7 +35,7 @@ export default function ContentPostCard({ post, lang, brand, catLabel, catColor,
       const mediaUrl = await uploadMedia(blob, `content-${post.id}.jpg`)
       const res = await fetch('/api/social-broadcast', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ caption: post.captions?.[lang] || post.captions?.en, mediaUrl, mediaType: 'image', scheduledFor }),
+        body: JSON.stringify({ caption: post.captions?.[lang] || post.captions?.en, mediaUrl, mediaType: 'image', scheduledFor, ...tenantFields() }),
       })
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || 'Post failed')

@@ -27,9 +27,16 @@ vi.mock('./postguard.js', async (importOriginal) => ({ ...(await importOriginal(
 
 const { default: broadcast } = await import('../social-broadcast.js')
 const { default: socialPost } = await import('../social-post.js')
+const { resetRateLimits } = await import('./tenant.js')
 
 const SECRET = 's3cret'
 const HOST = 'sidekick.example'
+// Every broadcast must now name WHOSE accounts it is publishing to — the
+// defaultProfile() fallback is gone, because "post to the default profile" means
+// "post to whichever agent happens to own it". The helper below supplies one so
+// each test below still asserts the thing it was written to assert; the tests
+// for the requirement itself are in the "names whose accounts" block.
+const PROFILE = 'profile-1'
 
 const mkRes = () => {
   const r = { statusCode: 0, body: null, headers: {} }
@@ -50,6 +57,12 @@ const browser = (extra = {}) => ({ 'sec-fetch-site': 'same-origin', origin: `htt
 
 const call = async (handler, body, headers, url) => {
   const res = mkRes()
+  await handler(mkReq({ profile: PROFILE, ...body }, headers, url), res)
+  return res
+}
+// The same call with nothing filled in for it — used to test the requirement.
+const callRaw = async (handler, body, headers, url) => {
+  const res = mkRes()
   await handler(mkReq(body, headers, url), res)
   return res
 }
@@ -69,6 +82,7 @@ Drop me a DM and I'll send over the full details and viewing times. 🏡`
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetRateLimits()
   process.env.INGEST_SECRET = SECRET
   process.env.POSTPEER_API_KEY = 'pp-key'
   process.env.POSTPEER_TIKTOK_ACCOUNT_ID = 'tt-configured'
@@ -160,6 +174,70 @@ describe('/api/social-broadcast: who may publish', () => {
     expect(res.statusCode).toBe(409)
     expect(res.body.duplicate).toBe(true)
     expect(global.fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('/api/social-broadcast: it must name whose accounts', () => {
+  // defaultProfile() used to answer this question. In production it answers ''
+  // (so the three in-app buttons that sent no profile have been 502-ing), and it
+  // answers with ONE SHARED TENANT the moment anyone sets POSTPEER_PROFILE_ID to
+  // fix the home screen's "No accounts" badge. Guessing is the bug.
+  it('refuses a post that names no profile, even with the right secret', async () => {
+    const res = await callRaw(broadcast, { caption: REAL }, { 'x-ingest-secret': SECRET })
+    expect(res.statusCode).toBe(400)
+    expect(res.body.error).toMatch(/profile/i)
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(social.connectedAccounts).not.toHaveBeenCalled()
+  })
+
+  it('never asks for a default profile', async () => {
+    await call(broadcast, { caption: REAL }, { 'x-ingest-secret': SECRET })
+    expect(social.defaultProfile).not.toHaveBeenCalled()
+  })
+
+  it('publishes to the profile the caller named', async () => {
+    await call(broadcast, { caption: REAL }, { 'x-ingest-secret': SECRET })
+    expect(social.connectedAccounts).toHaveBeenCalledWith(PROFILE)
+  })
+
+  // The Connect screen's test post is the one thing a brand-new agent does to
+  // confirm they are set up. It sends its profile and no credential.
+  it('still lets ConnectPage\'s test post through — profile, no secret', async () => {
+    const res = await call(broadcast, { caption: REAL }, browser())
+    expect(res.statusCode).toBe(200)
+    expect(social.connectedAccounts).toHaveBeenCalledWith(PROFILE)
+  })
+
+  it('closes the verified self-comparison bypass once a real host is known', async () => {
+    // Verified 2026-09-04: `{ host:'evil.test', origin:'https://evil.test' }`
+    // walked through, because Origin was compared against the caller's own Host.
+    process.env.APP_HOST = HOST
+    try {
+      const res = await callRaw(broadcast, { caption: REAL, profile: PROFILE },
+        { host: 'evil.test', origin: 'https://evil.test' })
+      expect(res.statusCode).toBe(401)
+      expect(global.fetch).not.toHaveBeenCalled()
+    } finally { delete process.env.APP_HOST }
+  })
+
+  it('and still admits the real host it is configured with', async () => {
+    process.env.APP_HOST = HOST
+    try {
+      const res = await callRaw(broadcast, { caption: REAL, profile: PROFILE }, { origin: `https://${HOST}` })
+      expect(res.statusCode).toBe(200)
+    } finally { delete process.env.APP_HOST }
+  })
+
+  it('throttles an uncredentialled flood, but not a secret-holder', async () => {
+    resetRateLimits()
+    const send = () => call(broadcast, { caption: `${REAL} ${Math.random()}` }, browser())
+    let last
+    for (let i = 0; i < 12; i++) last = await send()
+    expect(last.statusCode).toBe(429)
+    // The same profile, with the secret, is unaffected.
+    const authed = await call(broadcast, { caption: REAL }, { 'x-ingest-secret': SECRET })
+    expect(authed.statusCode).toBe(200)
+    resetRateLimits()
   })
 })
 
