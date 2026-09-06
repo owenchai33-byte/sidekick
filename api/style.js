@@ -105,7 +105,7 @@ export default async function handler(req, res) {
     if (!profile) return send(res, 400, { error: 'profile required' })
     try {
       if (body?.kind === 'brand') {
-        return send(res, 200, await saveBrand(profile, { color: body?.color, name: body?.name, region: body?.region }))
+        return send(res, 200, await saveBrand(profile, { color: body?.color, name: body?.name, region: body?.region, logo: body?.logo, cardEnabled: body?.cardEnabled }))
       }
       // This branch sat INSIDE the brand block, after its return: unreachable,
       // and gated on a kind it could never have. Every `remember` therefore fell

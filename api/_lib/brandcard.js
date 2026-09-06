@@ -34,6 +34,11 @@ function specLine(l) {
 export async function renderBrandCard(photoUrl, listing, brand = {}) {
   const accent = brand.color || process.env.BRAND_COLOR || GREEN
   const brandName = (brand.name || process.env.BRAND_NAME || '').trim()
+  // The agent's own mark, top-right, clear of the FOR SALE pill on the left and
+  // the price block along the bottom. Satori needs explicit dimensions, so it is
+  // boxed rather than left to size itself; a logo that fails to load leaves a
+  // gap, never a broken card, because the whole render is already best-effort.
+  const logo = String(brand.logo || '').trim()
   const tag = listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE'
   // NEVER SUBSTITUTE A LOCATION. This said `|| 'Kuching'`, so a Miri, Sibu or
   // Johor property had a Kuching address BURNED INTO THE IMAGE — the one place a
@@ -49,6 +54,8 @@ export async function renderBrandCard(photoUrl, listing, brand = {}) {
     h('div', { style: { position: 'absolute', top: 54, left: 56, display: 'flex', paddingTop: 14, paddingBottom: 14, paddingLeft: 30, paddingRight: 30, borderRadius: 999, backgroundColor: accent } },
       h('span', { style: { fontSize: 30, fontWeight: 800, color: '#ffffff', letterSpacing: 3 } }, tag),
     ),
+    logo ? h('div', { style: { position: 'absolute', top: 48, right: 56, display: 'flex', width: 200, height: 96, alignItems: 'center', justifyContent: 'flex-end' } },
+      h('img', { src: logo, style: { maxWidth: 200, maxHeight: 96, objectFit: 'contain' } })) : null,
     h('div', { style: { position: 'absolute', left: 56, right: 56, bottom: 68, display: 'flex', flexDirection: 'column' } },
       loc ? h('span', { style: { fontSize: 46, fontWeight: 700, color: '#ffffff' } }, loc) : null,
       h('span', { style: { fontSize: 104, fontWeight: 800, color: '#ffffff', lineHeight: 1.05, marginTop: 4 } }, money(listing)),

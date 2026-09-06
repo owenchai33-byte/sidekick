@@ -348,7 +348,7 @@ export default async function handler(req, res) {
       propertyName: src.propertyName ?? null,
     }
     const brand = await getBrand(item.profileId).catch(() => ({}))
-    const { items, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, body?.card !== false)
+    const { items, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, brand?.cardEnabled !== false && body?.card !== false)
 
     await putPending({ ...item, mediaItems: items, mediaCount: items.length, cover: card || items[0]?.url || null, cardFrom: cardFrom || null }, id)
     return send(res, 200, {
@@ -496,7 +496,7 @@ export default async function handler(req, res) {
   }
 
   // Render the branded cover + final media once (the approver sees the real thing).
-  const { items: mediaItems, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, body?.card !== false)
+  const { items: mediaItems, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, brand?.cardEnabled !== false && body?.card !== false)
   const captionShort = shortCaption(listing) // ≤90 chars for TikTok photo posts
   const feedBase = {
     location: listing.location || null,

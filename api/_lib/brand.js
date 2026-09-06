@@ -11,6 +11,19 @@
 import { put, list, del } from '@vercel/blob'
 
 const PREFIX = 'brand/'
+
+// cardEnabled defaults TRUE: an agent who has never set a brand keeps the card
+// they have always had. Only an explicit false turns it off.
+const EMPTY = { color: '', name: '', region: '', logo: '', cardEnabled: true }
+
+// A logo is drawn onto a public image, so it has to BE a public image. Anything
+// else is stored as empty rather than rejected — a bad logo must never stop a
+// post going out.
+function normaliseLogo(v) {
+  const u = String(v ?? '').trim()
+  if (!u) return ''
+  return /^https:\/\/[^\s]+$/i.test(u) ? u.slice(0, 500) : null
+}
 const tok = () => process.env.BLOB_READ_WRITE_TOKEN
 
 /** #RGB or #RRGGBB only — anything else is rejected rather than silently ignored,
@@ -31,22 +44,28 @@ async function versions(profileId, t) {
 
 export async function getBrand(profileId) {
   const t = tok()
-  if (!t || !profileId) return { color: '', name: '', region: '' }
+  if (!t || !profileId) return { ...EMPTY }
   try {
     const v = await versions(profileId, t)
-    if (!v.length) return { color: '', name: '', region: '' }
+    if (!v.length) return { ...EMPTY }
     const r = await fetch(v[0].url, { cache: 'no-store' })
-    if (!r.ok) return { color: '', name: '', region: '' }
+    if (!r.ok) return { ...EMPTY }
     const j = await r.json()
-    return { color: j.color || '', name: j.name || '', region: j.region || '' }
-  } catch { return { color: '', name: '', region: '' } }
+    return { color: j.color || '', name: j.name || '', region: j.region || '', logo: j.logo || '', cardEnabled: j.cardEnabled !== false }
+  } catch { return { ...EMPTY } }
 }
 
-export async function saveBrand(profileId, { color, name, region }) {
+export async function saveBrand(profileId, { color, name, region, logo, cardEnabled }) {
   const t = tok()
   if (!t) throw new Error('no BLOB token')
   if (!profileId) throw new Error('profile required')
   const cur = await getBrand(profileId)
+  let logoUrl = cur.logo || ''
+  if (logo !== undefined) {
+    const l = normaliseLogo(logo)
+    if (l === null) throw new Error(`"${logo}" is not an image link — send me the logo as a photo and I'll upload it`)
+    logoUrl = l
+  }
   let nextColor = cur.color
   if (color !== undefined) {
     const c = normaliseColor(color)
@@ -61,6 +80,11 @@ export async function saveBrand(profileId, { color, name, region }) {
     // only to talk about THEIR market instead of the pilot agent's. It is never
     // attached to a listing: a listing's location comes from the listing.
     region: region !== undefined ? String(region || '').trim().slice(0, 60) : cur.region,
+    // Their own mark, drawn top-right on the price card.
+    logo: logoUrl,
+    // Some agencies do not want a price panel on their photos at all. This is a
+    // standing choice, unlike the per-listing `card:false` an ingest call can pass.
+    cardEnabled: cardEnabled !== undefined ? cardEnabled !== false : cur.cardEnabled !== false,
     updatedAt: new Date().toISOString(),
   }
   const blob = await put(`${PREFIX}${profileId}.json`, JSON.stringify(data), {
