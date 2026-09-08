@@ -81,6 +81,28 @@ const DEMO_MARKERS = [
   /send over the full details and viewing times/i,
 ]
 
+// A MONEY FIGURE IN A CAPTION IS NOT AUTOMATICALLY AN INVENTION.
+//
+// Malaysian property captions state a great deal of arithmetic, all of it
+// computed off figures the listing really gives:
+//     "Deposit: 2 months (RM3,600)"        (rent x 2)
+//     "Downpayment only RM49,800"          (asking x 10%)
+//     "7% bumi discount, nett RM558,000"   (asking x 0.93)
+//     "RM3,500 + RM300 service charge (RM3,800 all in)"
+// captionViolations() has no arithmetic, so every one of those reads as an
+// invented figure. approve.js worked this out on 2026-09-05 and exempted them
+// at the ✅. The write path never got the same exemption, so the same caption
+// that approve.js would publish was marked degraded by ingest.js first — and
+// the repair prompt then instructed the model to DELETE a figure that is true.
+//
+// This is the shared definition so the two paths cannot drift apart again.
+const MONEY_INVENTION = /^rm\s*[\d.,]/i
+
+/** The invented claims that are NOT bare money figures — the ones that may refuse a post. */
+export function nonMoneyInventions(invented) {
+  return (invented || []).filter((v) => !MONEY_INVENTION.test(String(v).trim()))
+}
+
 /** True if this caption is the demo fallback rather than a real, styled caption. */
 export function looksLikeDemoCaption(caption) {
   const c = String(caption || '')
@@ -110,12 +132,52 @@ const REDUCTION_CLAIM = /\b(?:now only|reduced from|reduced by|slashed|off the a
  * Only fires when the listing itself says nothing about a reduction, so a
  * genuinely reduced listing still advertises normally.
  */
+// THE SOURCE SIDE READS THREE LANGUAGES, NOT ONE.
+//
+// REDUCTION_CLAIM above is English-only, and it was being run against BOTH the
+// caption and the agent's own listing text. A Chinese agent who wrote 降价出售
+// (原价 RM548,000) and a Malay agent who wrote "Harga sudah turun daripada
+// RM500,000" had genuinely reduced their price — and their English caption
+// saying so was refused as a fabrication. The verdict is also terminal: it is
+// checked once, outside the repair loop, so it fails identically forever.
+//
+// Widening only: this can make MORE captions pass, never fewer.
+const REDUCTION_SRC = new RegExp(
+  REDUCTION_CLAIM.source +
+  '|降价|降價|减价|減價|割价|劈价|下调|下調|原价|原價|原本|特价|特價|减了|優惠前' +
+  '|\\bturun\\s*harga\\b|\\bharga\\s*(?:sudah\\s*)?turun\\b|\\bditurunkan\\b|\\bdikurangkan\\b|\\bpotongan\\s*harga\\b|\\bdaripada\\s*rm',
+  'i')
+
+/**
+ * True when the caption claims a price cut the source listing never made.
+ * Only fires when the listing itself says nothing about a reduction, so a
+ * genuinely reduced listing still advertises normally — in any of the three
+ * languages this product publishes in.
+ */
 export function inventsPriceHistory(caption, listing) {
   const cap = String(caption || '')
   if (!REDUCTION_CLAIM.test(cap)) return false
+  // "NOW ONLY RM650" ON A SINGLE-PRICE LISTING IS A HOOK, NOT A HISTORY.
+  //
+  // The incident this guard exists for is the model writing a PRIOR price that
+  // never existed: "RM438,000 / NOW ONLY RM338,000 / PRICE REDUCED". What makes
+  // that a lie is the second figure. A caption whose only money figure is the
+  // listing's own price has asserted no history at all, and refusing it took out
+  // "Now only RM650 a month" — an ordinary caption for an ordinary studio.
+  // The two-figure case is still caught here AND independently by
+  // captionViolations(), which reports RM438,000 as invented.
+  // Every member of REDUCTION_CLAIM except "now only" asserts a history on its
+  // own. "Now only" does not, so it is the only one that needs a second figure
+  // before it counts.
+  const STRONG_REDUCTION = /\b(?:reduced from|reduced by|slashed|off the asking price|price\s*(?:reduced|reduction|drop|dropped|slashed|cut))\b|\b(?:was|down from|originally|previously)\s*(?:priced\s*at\s*)?rm/i
+  if (!STRONG_REDUCTION.test(cap)) {
+    const figures = new Set()
+    for (const m of cap.matchAll(RM_AMOUNT)) { const v = amountOf(m[1], m[2]); if (Number.isFinite(v) && v > 0) figures.add(v) }
+    if (figures.size <= 1) return false
+  }
   // The agent's own words are the authority. If THEY said it was reduced, fine.
   const source = `${listing?.rawText || ''} ${listing?.title || ''}`
-  return !REDUCTION_CLAIM.test(source)
+  return !REDUCTION_SRC.test(source)
 }
 
 
@@ -264,6 +326,8 @@ export function resolvePropertyName(listing) {
 // the agent's house style writes the short form. Demanding the long form
 // refused both (measured 2026-09-04; the second is a regression the heuristic
 // did not have, because it returned the shorter form itself).
+// Han / kana, for deciding whether two strings are even in the same script.
+const HAS_CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
 const NAME_GENERIC = /^(?:the|and|at|de|di|residences?|residency|apartments?|condo|condominium|court|suites?|towers?|parks?|city|gardens?|heights|villas?|point|square|place|homes?|house|hills?|views?|phase|block|jaya|indah|permai|utama|baru|kuching|sarawak)$/i
 
 /**
@@ -278,7 +342,25 @@ export function carriesName(caption, name) {
   if (cap.includes(flatten(name))) return true
   const distinctive = String(name).split(/[^\p{L}\p{N}]+/u)
     .filter((t) => t.length >= 4 && !NAME_GENERIC.test(t))
-  return distinctive.some((t) => cap.includes(t.toLowerCase()))
+  if (distinctive.some((t) => cap.includes(t.toLowerCase()))) return true
+  // A CJK NAME CANNOT BE CHECKED AGAINST A CAPTION IN ANOTHER SCRIPT.
+  //
+  // The split above is on non-letters, so a Chinese building name is ONE
+  // indivisible token: 美丽华公寓 either appears verbatim or it does not. An
+  // English caption for that listing — "FOR RENT — Mei Li Hua Apartment" — was
+  // therefore scored as having dropped the name, which lands in v.missing, which
+  // the `property name` filter in ingest.js:156 blocks on. The only way past was
+  // to paste Chinese characters into the English caption.
+  //
+  // Cross-language captioning IS the product: the same listing is published in
+  // en, zh and ms. This guard has no transliteration table and cannot get one,
+  // so on a mixed-script pair it does not know the answer — and an unverifiable
+  // check must not refuse. It stays strict in the direction it CAN check: a
+  // Latin name is still required in a Chinese caption, because agents do carry
+  // "RENNA" through verbatim, and a name written in the caption's own script is
+  // still required to be there.
+  if (HAS_CJK.test(String(name)) && !HAS_CJK.test(cap)) return true
+  return false
 }
 
 // Invented NUMBERS.
@@ -487,7 +569,10 @@ const YIELD_CLAIM = [
 // authorised a 7.19% yield, and psf authorised three more. Every figure here
 // only ever WIDENS what a caption may say, so the loose end of this is a miss,
 // never a refusal.
-const RENT_MARKER = /rent(?:al|ed)?|sewa|租金|月租|年租|per\s*month|\/\s*month|a\s+month|sebulan|per\s*annum|setahun|monthly|annual/i
+// 出租 and 招租 are how a Chinese listing SAYS "for rent" — without them the
+// source gate was blind to the plainest Chinese rental text, so a correct
+// Chinese rental caption was refused with three findings.
+const RENT_MARKER = /rent(?:al|ed)?|sewa|租金|月租|年租|出租|招租|房屋出租|per\s*month|\/\s*month|a\s+month|sebulan|per\s*annum|setahun|monthly|annual/i
 const MONEY_TOKEN = /(?:\brm\s*)?(\d[\d,]*(?:\.\d+)?)\s*((?:k|juta|jt|mil|million)\b|万|萬)?/gi
 
 function rentFigures(listing) {
@@ -648,12 +733,351 @@ const FACILITY_CLAIMS = [
   ['covered parking', /\bcovered\s*(?:car\s*)?(?:bay|park(?:ing)?|porch)\b|有盖车位|有蓋車位|tempat\s*letak\s*kereta\s*berbumbung/i, /covered|porch|garage|sheltered|有盖|有蓋|berbumbung|bumbung|car\s?park|parking|车位|車位/i],
 ]
 
+// -- SALE versus RENT: the transaction itself --------------------------------
+//
+// Live on a client's Facebook page 2026-09-05. A RM2,500/month RENTAL (RENNA
+// RESIDENCE) published under the heading "💰 Selling Price", with a section
+// titled "Why Buy This Property?" and the hashtag "#PCMY_Sale". Three
+// statements of the wrong transaction, in one caption, about the single most
+// material fact after the price.
+//
+// The model was doing exactly what it was told. The agent's trained style says
+// "Copy the EXACT layout, emojis, voice AND SPACING of the example captions
+// below on EVERY listing", and BOTH stored examples are SALES carrying a "💰
+// Selling Price" heading. A style example is a FORMAT; the transaction is a
+// FACT. prompts.js now says so; this is the check behind it. Before this,
+// `listingType` was read in exactly one place in this file (rentFigures), and
+// only to ground a rent figure.
+//
+// THE LINE THIS RULE DRAWS, and it is the whole design. A caption may
+// legitimately MENTION the other transaction:
+//     a sale stating its tenancy       "Currently tenanted at RM1,300/month"
+//     an investment line               "RM1,800/month — about 4.2% gross yield"
+//     a genuine dual listing           "FOR SALE OR RENT"
+// so a mention is never enough. Only a caption that DECLARES the transaction to
+// be the opposite type is refused. Four gates stand in front of every blocking
+// finding; any one of them downgrades it to a warning or drops it entirely:
+//
+//   DUAL     the caption offers both ("FOR SALE OR RENT"). A real Malaysian
+//            listing type, and it is in this very agent's stored style
+//            examples - blocking it would strip the format they pay for.
+//   MIXED    the caption also declares the TRUE type. Then it is a mixed
+//            caption, not a contradiction, and mixed only ever warns.
+//   SOURCE   the agent's own listing text talks that way. Their words are the
+//            authority (the same rule inventsPriceHistory uses), and this is
+//            also what makes a MIS-PARSED listingType harmless: a shoplot whose
+//            text says "for sale" can never be refused for writing "for sale",
+//            whatever the parser decided it was.
+//   NEGATED  "not for sale", "bukan untuk dijual", 不出售.
+//
+// The two directions are deliberately NOT symmetric in strength, because their
+// false positives are not symmetric. Rental listings almost never discuss
+// selling, so the SOURCE gate rarely fires there and the rental direction
+// (the direction of the incident) stays sharp. Sale listings discuss rent
+// constantly - tenancy, rental income, yield - so the sale direction is
+// gated by a deliberately WIDE rent marker and misses more. That is the right
+// trade: a miss reaches the repair round as a warning; a wrong refusal is
+// silent, total, and this project has shipped five of them.
+
+// A negation immediately in front of a match. "Not for sale" is a statement
+// about the transaction being the TRUE type.
+const TXN_NEGATED = /(?:\bnot\b|\bno\b|\bnever\b|\bbukan\b|\btidak\b|\bjangan\b|不|非|勿|未)\s*(?:available\s+)?(?:for\s+)?$/i
+
+// A declaration preceded by one of these is about a POSSIBILITY or a second
+// option, not about what this listing IS. "Vacant and ready for rent" on a sale
+// is ordinary investor copy, and at 21 letters its line is short enough to read
+// as a heading - so without this it would have been refused. Downgraded to a
+// warning rather than dropped: the repair round should still look at it.
+// The \b matters: without it the "or" alternative matched inside "12th Floor",
+// so "12th Floor for rent" quietly downgraded itself. CJK needs no boundary.
+const TXN_QUALIFIED = /(?:\b(?:ready|available|vacant|suitable|perfect|ideal|good|great|potential|option|opportunity|also|too|either|whether|or|instead|sedia|boleh|sesuai|juga|atau|pilihan)\b|可以|也|或|适合|適合)\s*(?:to\s+|be\s+|is\s+)?$/i
+
+// BOTH transactions offered at once. Not a contradiction - a superset, and a
+// real listing type here ("FOR SALE OR RENT", "jual/sewa"). Never blocks.
+const TXN_DUAL = /\b(?:for\s+)?sale\s*(?:or|and|&|\/|,)\s*(?:for\s+)?rent(?:al)?\b|\b(?:for\s+)?rent(?:al)?\s*(?:or|and|&|\/|,)\s*(?:for\s+)?sale\b|\bdijual\s*(?:atau|dan|&|\/|,)\s*disewa\b|\bdisewa\s*(?:atau|dan|&|\/|,)\s*dijual\b|\bjual\s*\/\s*sewa\b|\bsewa\s*\/\s*jual\b|出售\s*(?:或|和|与|與|、|\/)\s*出租|出租\s*(?:或|和|与|與|、|\/)\s*出售|售\s*\/\s*租|租\s*\/\s*售|#for\s?sale\s?or\s?rent\b/i
+
+// Each side of the transaction, in the three languages this product writes in.
+//
+//   decl       the caption DECLARES the transaction to be this type
+//   priceLabel the half of `decl` that labels a PRICE - the RENNA heading
+//   cta        a call to action only this transaction can make
+//   hashtag    the category tag; a tag is not prose, so it has no ambiguity
+//   sourceAny  WIDE. "does the agent's own text talk this way at all?" Only
+//              ever makes the guard more permissive, so when in doubt it goes in
+//   loose      words that lean this way but are not a declaration - WARN only
+const TXN_SALE = {
+  type: 'SALE', other: 'sale',
+  decl: /\bfor\s+sale\b|\bon\s+sale\b|\bnow\s+selling\b|\bselling\s+price\b|\bsales?\s+price\b|\buntuk\s+dijual\b|\bdijual\b|\bharga\s+jual(?:an)?\b|出售|待售|出讓|出让|售价|售價/i,
+  priceLabel: /\bselling\s+price\b|\bsales?\s+price\b|\bharga\s+jual(?:an)?\b|售价|售價|出售价|出售價/i,
+  cta: /\bwhy\s+buy\b|\bbuy\s+(?:this|it|now|today)\b|\bown\s+this\b|\bpurchase\s+this\b|\bkenapa\s+(?:nak\s+)?beli\b|\bbeli\s+(?:rumah\s+|unit\s+)?ini\b|\bmiliki\s+(?:rumah|unit|hartanah)\s+ini\b|为什么(?:要)?买|為什麼(?:要)?買|为何(?:要)?买|买下这|買下這|购买此|購買此/i,
+  // #Sale, #SALE and #Sales are the plainest sale tags in this market and the
+  // old pattern could not see any of them: it demanded a literal "_sale" or
+  // "forsale". The tag body is now matched whole, which is what keeps
+  // #Wholesale out — "wholesale" is one word, not a boundary followed by sale.
+  hashtag: /#[A-Za-z0-9]*[_-]sales?\b|#(?:for)?sales?\d*\b|#[A-Za-z0-9]*forsale\w*\b|#(?:dijual|rumahdijual|hartanahdijual|jualrumah|propertydijual|hartanahjual)\b|#[^\s#]*(?:出售|待售|售)/i,
+  sourceAny: /\bsale\b|\bsell(?:s|ing)?\b|\bsold\b|\bbuy(?:s|er|ers|ing)?\b|\bpurchas(?:e|ed|ing)\b|\bjual\b|dijual|\bbeli\b|pembeli|售|买|買|购|購/i,
+  loose: /\bpurchase\b|\bownership\b|\bbuyers?\b|\bbeli\b|\bpembeli\b|购买|購買|买房|買房|买家|買家/i,
+}
+const TXN_RENT = {
+  type: 'RENTAL', other: 'rental',
+  // "to let" needs the pronoun guard or it fires on "to let you know".
+  decl: /\bfor\s+rent\b|\bfor\s+lease\b|\bto\s+let\b(?!\s+(?:you|us|me|him|her|them|it)\b)|\brental\s+price\b|\brent\s+price\b|\bmonthly\s+rent(?:al)?\b|\brent\s+per\s+month\b|\buntuk\s+disewa\b|\bdisewa(?:kan)?\b|\bharga\s+sewa\b|\bsewa\s+bulanan\b|出租|招租|月租|租金/i,
+  priceLabel: /\brental\s+price\b|\brent\s+price\b|\bmonthly\s+rent(?:al)?\b|\brent\s+per\s+month\b|\bharga\s+sewa\b|\bsewa\s+bulanan\b|月租金?|租金/i,
+  cta: /\bwhy\s+rent\b|\brent\s+(?:this|it)\b|\bkenapa\s+(?:nak\s+)?sewa\b|\bsewa\s+(?:rumah\s+|unit\s+)?ini\b|为什么(?:要)?租|為什麼(?:要)?租|为何(?:要)?租|租下这|租下這/i,
+  hashtag: /#[A-Za-z0-9]*[_-]rent(?:als?)?\b|#(?:for|to)?rent(?:als?)?\d*\b|#[A-Za-z0-9]*forrent\w*\b|#(?:disewa|rumahsewa|sewarumah|sewa)\b|#[^\s#]*(?:出租|招租|租)/i,
+  // RENT_MARKER already exists for rentFigures() and is exactly the wide
+  // "this text talks about rent" test needed here. It matches "/month",
+  // "monthly", "annual", "Current Rental" and "tenanted at ... /month", which
+  // is what clears every tenanted-sale caption in the corpus.
+  sourceAny: RENT_MARKER,
+  // NOT "tenant"/"tenancy": a sale stating its tenancy is the commonest
+  // legitimate both-mention in this market and must not even warn.
+  loose: /\bleasing\b|\bletting\b|\bpenyewa\b|租客|承租/i,
+}
+
+/** The first match of `re` in `text` that is not directly negated. */
+function firstUnnegated(text, re) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`)
+  for (const m of String(text).matchAll(g)) {
+    if (TXN_NEGATED.test(String(text).slice(Math.max(0, m.index - 14), m.index))) continue
+    return m
+  }
+  return null
+}
+
+/**
+ * Money figures the SOURCE itself puts in a clause that talks this way.
+ * Clause-scoped like rentFigures(), and the reason T1 below can be trusted:
+ * on a tenanted sale the source's rent figure is the TENANCY (RM1,300), never
+ * the asking price (RM520,000), so labelling the asking price as rent is still
+ * a contradiction - while a MIS-PARSED listing whose text calls that very
+ * amount a rent is cleared.
+ */
+function amountsLabelled(rawText, marker) {
+  const out = new Set()
+  for (const frag of String(rawText || '').split(/[\n。；;]+|(?<=[a-z0-9)])\.\s/gi)) {
+    if (!marker.test(frag)) continue
+    for (const m of frag.matchAll(MONEY_TOKEN)) {
+      const v = amountOf(m[1], m[2])
+      if (Number.isFinite(v) && v > 0) out.add(v)
+    }
+  }
+  return [...out]
+}
+
+const near1pc = (a, b) => Math.abs(a - b) <= Math.max(1, b * 0.01)
+
+/** Letters and digits only - a heading is short, a sentence is not. */
+const alnumLen = (s) => String(s).replace(/[^\p{L}\p{N}]/gu, '').length
+
+/**
+ * A caption that states the wrong transaction. Returns { invented, warnings }.
+ *
+ * Silent when listingType is absent or unrecognised: an unknown truth cannot be
+ * contradicted, exactly as contradictsRoomCounts() is silent without a count.
+ */
+export function transactionTypeConflicts(caption, listing) {
+  const cap = String(caption || '')
+  const out = { invented: [], warnings: [] }
+  if (!cap.trim()) return out
+
+  const t = String(listing?.listingType || '').toLowerCase()
+  const isRental = /rent|sewa|租/.test(t)
+  const isSale = !isRental && /sale|sell|jual|售/.test(t)
+  if (!isRental && !isSale) return out
+
+  const TRUE_T = isRental ? TXN_RENT : TXN_SALE
+  const OPP = isRental ? TXN_SALE : TXN_RENT
+  const src = `${listing?.rawText || ''} ${listing?.title || ''}`
+
+  const dual = TXN_DUAL.test(cap)                 // "FOR SALE OR RENT"
+  const mixed = TRUE_T.decl.test(cap)             // the caption also says the truth
+  const grounded = OPP.sourceAny.test(src)        // the agent's own words
+
+  // TWO SOFTENERS, AND THEY ARE NOT THE SAME STRENGTH.
+  //
+  // `dual` is a real listing type: "FOR SALE OR RENT" appears in this agent's
+  // own stored style examples, and nothing about it may ever refuse a post.
+  //
+  // `mixed` used to be just as strong, and that made the guard blind to the
+  // incident's nearest neighbour. Measured: the published RENNA caption with
+  // one word changed — the headline reading "RENNA RESIDENCE — FOR RENT" —
+  // PUBLISHED with "💰 Selling Price / RM2,500/month", "Why Buy This Property?"
+  // and "#PCMY_Sale" all intact, because that one true-type phrase downgraded
+  // every finding to a warning. The new prompt pushes the model to put FOR RENT
+  // in the headline, so the rule was sharpest against a caption we had just
+  // made rarer and blind to the one we had made commoner.
+  //
+  // Worse, it disarmed the REPAIR ROUND: fixing only the price heading CREATES
+  // a true-type phrase, which turned the two remaining findings into warnings
+  // and published a rental still asking the reader to buy it.
+  //
+  // So `mixed` now softens only the PROSE rules, where a caption discussing
+  // both transactions really is ambiguous. A price label on the asking price, a
+  // category hashtag and a buy/rent CTA are structural: saying "FOR RENT"
+  // elsewhere does not make "Why Buy This Property?" true.
+  const soften = dual || mixed                    // prose: may warn, never refuse
+  const softenHard = dual                         // structural: only a dual listing
+
+  const say = (hit, why) => `"${String(hit).trim().replace(/\s+/g, ' ')}" — this listing is a ${TRUE_T.type}, ${why}`
+  const file = (msg) => (soften ? out.warnings : out.invented).push(msg)
+  const fileHard = (msg) => (softenHard ? out.warnings : out.invented).push(msg)
+  // T1 and T3 read the same words ("Selling Price" is both a price label and a
+  // declaration). One finding per phrase, or the repair prompt is told to fix
+  // the same three characters twice.
+  const said = new Set()
+  const once = (hit) => {
+    const k = String(hit).trim().toLowerCase()
+    if (said.has(k)) return false
+    said.add(k); return true
+  }
+
+  // T1 - BLOCKS. AN OPPOSITE-TYPE PRICE LABEL ON THE LISTING'S OWN ASKING PRICE.
+  // The RENNA heading exactly: "💰 Selling Price" over "RM2,500/month", where
+  // 2,500 IS listing.price. This is the one pattern that needs no judgement -
+  // the asking price of a rental is its rent and cannot also be a selling
+  // price, and the number proves which figure is being labelled.
+  // FALSE POSITIVE NAMED: a sale that quotes its tenancy ("Current Rental :
+  // RM1,300/month" on a RM338,000 unit) labels a DIFFERENT figure, so it cannot
+  // match. A listing the parser mis-typed - text says "RM1,300/month for rent",
+  // parser says sale - is cleared by amountsLabelled(), which finds the source
+  // itself calling that same amount a rent.
+  const price = Number(listing?.price)
+  if (Number.isFinite(price) && price > 0) {
+    const m = firstUnnegated(cap, OPP.priceLabel)
+    if (m) {
+      // The figure a label labels is the NEXT one, and only the next one.
+      // Measured on the Chinese corpus entry "售价 RM338,000 … 现租金 RM1,300/月":
+      // a symmetric window around 租金 reached back a line and read RM338,000 as
+      // the labelled figure, turning a faithful tenanted-sale caption into a
+      // finding. Forward-only, nearest token, at most one line break - which is
+      // the RENNA layout, a heading with its value underneath.
+      const tail = m.index + m[0].length
+      const nl = cap.indexOf('\n', tail)
+      const stop = Math.min(cap.length, tail + 60, nl === -1 ? cap.length : (cap.indexOf('\n', nl + 1) === -1 ? cap.length : cap.indexOf('\n', nl + 1)))
+      const first = [...cap.slice(tail, stop).matchAll(MONEY_TOKEN)]
+        .map((mm) => amountOf(mm[1], mm[2])).find((v) => Number.isFinite(v) && v > 0)
+      const onAskingPrice = first != null && near1pc(first, price)
+      const srcCallsItThat = amountsLabelled(listing?.rawText, OPP.sourceAny).some((v) => near1pc(v, price))
+      // `!grounded` — THE SAME GATE T2, T3 AND T4 ALREADY HAD, and leaving it off
+      // here made this the sixth silent refusal. listingType comes from the
+      // parser, ingest.js defaults it to 'sale' when the parser says nothing,
+      // and demoParse — the fallback used every time the free tier rate-limits —
+      // could not read 出租 at all. So a correct Chinese rental caption was
+      // refused with three findings, and the agent was told the caption ENGINE
+      // had failed, which sent them to debug the wrong system forever.
+      //
+      // srcCallsItThat alone was not enough: it needs the amount and the rent
+      // word in one clause, and real listings say "for Rent" in sentence one and
+      // "RM2.5k nego" three sentences later. Measured: 4 of 5 realistic
+      // mis-parses newly refused a caption that was entirely correct.
+      //
+      // This only ever widens. On the real incident the source is a rental and
+      // says no sale words at all, so `grounded` is false and T1 still fires.
+      if (onAskingPrice && !srcCallsItThat && !grounded && once(m[0])) {
+        fileHard(say(m[0], `RM${price.toLocaleString('en-MY')} is its ${isRental ? 'monthly rent' : 'asking price'}, not a ${OPP.other} price`))
+      }
+    }
+  }
+
+  // T2 - BLOCKS. THE OPPOSITE-TYPE HASHTAG ("#PCMY_Sale" on a rental).
+  // A hashtag is a category, not prose: it puts the post in the wrong search
+  // bucket and it cannot be a passing mention.
+  // FALSE POSITIVE NAMED: "#Wholesale" - the tag BODY is matched whole, and
+  // "wholesale" is one word, so there is no boundary before "sale". A dual tag
+  // (#ForSaleOrRent) is caught by TXN_DUAL first and only warns.
+  // Structural, so a FOR RENT line elsewhere does not excuse it: the tag still
+  // files the post in the wrong search bucket.
+  if (!grounded && !dual) {
+    const h = firstUnnegated(cap, OPP.hashtag)
+    if (h && once(h[0])) fileHard(say(h[0], `not for ${isRental ? 'sale' : 'rent'} — use the ${TRUE_T.type.toLowerCase()} hashtag`))
+  }
+
+  // T3 - BLOCKS ON A LABEL LINE, WARNS IN PROSE. THE TRANSACTION DECLARATION.
+  // A style template's banner ("🏡 FOR SALE" on its own line) declares what the
+  // listing IS. The same words inside a sentence usually do not.
+  // FALSE POSITIVES NAMED, and each is real Malaysian sale copy:
+  //   "Vacant and ready for rent"      21 letters, short enough to read as a
+  //                                    heading - caught instead by TXN_QUALIFIED
+  //   "Currently for rent at RM1,800/month, asking RM520,000"   >48 -> warns
+  //   "现租金 RM1,300/月，年租 RM15,600"  a heading-length tenancy line, cleared
+  //                                    by the SOURCE gate: the listing says it
+  // while "FOR SALE" (7), "🏡 FOR SALE" (7) and "Riverine Diamond — for rent"
+  // (22, and the caption's first line) are headings, and refuse.
+  if (!grounded && !dual) {
+    const lines = cap.split('\n')
+    const firstIdx = lines.findIndex((l) => l.trim())
+    let filed = false
+    for (let i = 0; i < lines.length && !filed; i++) {
+      const m = firstUnnegated(lines[i], OPP.decl)
+      if (!m || !once(m[0])) continue
+      const qualified = TXN_QUALIFIED.test(lines[i].slice(Math.max(0, m.index - 20), m.index))
+      const isLabelLine = alnumLen(lines[i]) <= 24
+      const isHeadline = i === firstIdx && alnumLen(lines[i]) <= 48
+      const msg = say(m[0], `not for ${isRental ? 'sale' : 'rent'}`)
+      // A BANNER is structural; the same words inside a sentence are not.
+      if (!qualified && (isLabelLine || isHeadline)) fileHard(msg)
+      else out.warnings.push(msg)
+      filed = true
+    }
+  }
+
+  // T4 - BLOCKS. A CALL TO ACTION NAMING THE WRONG TRANSACTION.
+  // "Why Buy This Property?" on a rental asks a reader to do something they
+  // cannot do. Second person, and about this property - a tenancy mention
+  // never takes this shape.
+  // FALSE POSITIVE NAMED: "Why buy when you can rent?" is real rental copy and
+  // would match `why buy`. It is cleared by the CLAUSE test below - the line it
+  // sits on also names the true transaction, so it is a comparison, not a
+  // declaration. Same for "Why rent when you can buy?" on a sale.
+  if (!grounded && !dual) {
+    const c = firstUnnegated(cap, OPP.cta)
+    if (c && once(c[0])) {
+      const start = cap.lastIndexOf('\n', c.index) + 1
+      const end = cap.indexOf('\n', c.index)
+      const clause = cap.slice(start, end === -1 ? cap.length : end)
+      const TRUE_LOOSE = isRental ? /\brent|\bsewa|租/i : /\bbuy|\bsale|\bsell|\bjual|\bbeli|售|买|買/i
+      if (!TRUE_LOOSE.test(clause)) {
+        // Structural: a headline saying FOR RENT does not make "Why Buy This
+        // Property?" true. The clause test above is what protects the real
+        // comparison copy ("Why buy when you can rent?").
+        fileHard(say(c[0], `do not ask the reader to ${isRental ? 'buy' : 'rent'} it`))
+      }
+    }
+  }
+
+  // W1 - WARNS ONLY. Words that lean the wrong way without declaring anything:
+  // "purchase", "ownership", 购买, "leasing". Too ordinary to refuse a client's
+  // post over, specific enough that the repair round should look.
+  if (!grounded && !soften) {
+    const l = firstUnnegated(cap, OPP.loose)
+    if (l && !OPP.decl.test(cap) && !OPP.cta.test(cap)) {
+      out.warnings.push(say(l[0], `check this reads as a ${TRUE_T.type.toLowerCase()}`))
+    }
+  }
+
+  // W2 - WARNS ONLY. "FOR SALE OR RENT" on a listing the agent offered only one
+  // way. It is a real listing type and it is in this agent's stored style
+  // examples, so it never refuses - but if the agent never offered both, the
+  // repair round should hear about it.
+  if (dual && !TXN_DUAL.test(src) && !grounded) {
+    out.warnings.push(`the caption offers this both for sale and for rent — the listing is a ${TRUE_T.type} only`)
+  }
+
+  return { invented: [...new Set(out.invented)], warnings: [...new Set(out.warnings)] }
+}
+
 /**
  * Returns { missing, invented, warnings } - the first two empty means the
  * caption honours the listing. `warnings` are advisory ONLY and must never
  * refuse a post; see the property-name note below. `listing` is the parsed
  * listing incl. rawText.
  */
+// Figures an agent states as a cost of transacting rather than as the price of
+// the property: deposits, utility deposits, service charges, booking fees. A
+// Facebook ad that carries the rent and leaves these out is normal copy.
+const ANCILLARY_MONEY = /deposit|utilit|service\s*charge|maintenance|booking|earnest|cagaran|wang\s*pendahuluan|caj\s*perkhidmatan|押金|訂金|订金|定金|管理费|管理費|杂费|雜費|服务费|服務費/i
+
 export function captionViolations(caption, listing) {
   const cap = String(caption || '')
   const capLow = cap.toLowerCase()
@@ -691,12 +1115,43 @@ export function captionViolations(caption, listing) {
       add(amountOf(m[1], m[2]))
     }
   }
-  for (const raw of new Set([...src.matchAll(/rm\s?([\d,]+(?:\.\d+)?\s*k?)/gi)].map((x) => x[1].replace(/\s/g, '').toLowerCase()))) {
+  // AN ADVERT MUST STATE A PRICE. IT NEED NOT STATE EVERY FIGURE IN THE WHATSAPP
+  // MESSAGE.
+  //
+  // This walk pushed EVERY RM figure in the source into `missing`, all of them
+  // equally required. A real listing carries several — the rent, then the
+  // deposit, then the utility deposit, then the service charge — and a Facebook
+  // ad that carries the rent and drops the two deposits is normal copy, not a
+  // misrepresentation. Two such omissions tripped ingest.js's `missing.length >
+  // 1` and the agent's post silently never went out.
+  //
+  // So: when the caption carries the listing's OWN headline price, a figure the
+  // agent's own text labels as a DEPOSIT or a CHARGE is a warning. Everything
+  // else still refuses — in particular the below-value saving, which is the
+  // agent's strongest number and stays required (see money-spelling.test.mjs).
+  // When the caption carries no price at all, every figure stays missing: an
+  // advert with no price is the thing this check is for.
+  const headline = Number(listing?.price)
+  const capHasHeadline = Number.isFinite(headline) && headline > 0 && capValues.has(headline)
+  const seenRaw = new Set()
+  for (const m of src.matchAll(/rm\s?([\d,]+(?:\.\d+)?\s*k?)/gi)) {
+    const raw = m[1].replace(/\s/g, '').toLowerCase()
+    if (seenRaw.has(raw)) continue
+    seenRaw.add(raw)
     const canon = raw.endsWith('k') ? String(parseFloat(raw) * 1000) : raw.replace(/,/g, '')
     const asNumber = Number(canon)
     const sameMoney = Number.isFinite(asNumber) && asNumber > 0 && capValues.has(asNumber)
     const inCap = sameMoney || capLow.includes(raw) || cap.replace(/,/g, '').includes(canon)
-    if (!inCap) missing.push(`RM${raw.toUpperCase()}`)
+    if (inCap) continue
+    // The words around the figure in the AGENT'S OWN TEXT, which is the only
+    // thing that says what the figure is for.
+    const around = src.slice(Math.max(0, m.index - 44), m.index + m[0].length + 28)
+    const isHeadline = Number.isFinite(asNumber) && asNumber === headline
+    if (capHasHeadline && !isHeadline && ANCILLARY_MONEY.test(around)) {
+      warnings.push(`the listing also mentions RM${raw.toUpperCase()} (${'a deposit or charge — include it only if it belongs in the ad'})`)
+    } else {
+      missing.push(`RM${raw.toUpperCase()}`)
+    }
   }
   const sq = src.match(/([\d,]+)\s*(?:sq\s?ft|sqft|square feet)/i)
   if (sq && !cap.replace(/,/g, '').includes(sq[1].replace(/,/g, ''))) missing.push(`${sq[1]} sqft`)
@@ -851,6 +1306,17 @@ export function captionViolations(caption, listing) {
     const place = m[1].toLowerCase().replace(/\s+/g, ' ')
     if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
   }
+  // SALE versus RENT. A caption that states the wrong transaction is making a
+  // false claim about the most material fact after the price - and unlike the
+  // walks above, the truth is a field the parser already produced. See the long
+  // note at transactionTypeConflicts(): it fires on a CONTRADICTION, never on a
+  // mention, and hands back its own blocking/warning split.
+  {
+    const txn = transactionTypeConflicts(cap, listing)
+    invented.push(...txn.invented)
+    warnings.push(...txn.warnings)
+  }
+
   // `marketing` is separate from `invented` on purpose. Both drive the repair
   // round, but only `invented` blocks: a wrong price is a factual error nobody
   // should publish, while a stray "spacious" that survived two repair attempts

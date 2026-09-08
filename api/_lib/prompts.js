@@ -5,6 +5,7 @@
 import { resolvePropertyName } from './postguard.js'
 
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
+import { transactionTag } from '../../shared/txn.js'
 
 /** PARSE: raw WhatsApp/listing blob → structured fields the agent can correct. */
 export function buildParsePrompt(rawText) {
@@ -81,8 +82,35 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
   const sg = styleGuide || {}
   const styleRules = (sg.style || '').trim()
   const styleExamples = Array.isArray(sg.examples) ? sg.examples.filter((e) => e && e.trim()) : []
+  // A STYLE EXAMPLE IS A FORMAT, NOT A FACT.
+  //
+  // 2026-09-05, live on a client's page: a RM2,500/month RENTAL published under
+  // the heading "💰 Selling Price", with a "Why Buy This Property?" section and
+  // "#PCMY_Sale". The agent's trained style says "Copy the EXACT layout, emojis,
+  // voice AND SPACING of the example captions below on EVERY listing", and BOTH
+  // their stored examples are SALE listings carrying a "💰 Selling Price"
+  // heading. The model copied the heading faithfully onto a rental - which is
+  // precisely what it was told to do.
+  //
+  // The fix is NOT to soften the style instruction: format matching is the
+  // feature agents pay for, and the last time a rule was widened past its remit
+  // ("never use the fire emoji" read as a blanket emoji ban) it flattened a real
+  // client's captions on a live page. So the format instruction stays exactly as
+  // strong, and one carve-out is added beside it - the words that name the
+  // transaction come from THIS listing, never from the example.
+  const exampleContract = `
+A STYLE EXAMPLE IS A FORMAT, NOT A FACT. Copy its layout, headings, emoji,
+dividers, CAPS, spacing, ordering and sign-off exactly. Copy NOTHING it says
+about a different property: not its price, size, location or name, and above all
+not WHETHER IT WAS A SALE OR A RENTAL. The examples may all be sales while this
+listing is a rental, or the reverse. Where an example's wording names the
+transaction — "💰 Selling Price", "FOR SALE", "Why Buy This Property?", a
+"#..._Sale" hashtag — keep the SHAPE and swap the WORDS to this listing's own
+transaction: "💰 Monthly Rent", "FOR RENT", "Why Rent This Property?",
+"#..._Rent". Same heading, same emoji, same position, right transaction.`
+
   const styleBlock = (styleRules || styleExamples.length)
-    ? `\n\nTHE AGENT'S OWN STYLE — HIGHEST PRIORITY. Follow these exactly; they override any default tone/length/emoji/hashtag guidance below where they conflict:\n${styleRules || '(no written rules — match the examples)'}${styleExamples.length ? `\n\nMatch the voice, length and formatting of these example captions the agent wrote:\n${styleExamples.map((e, i) => `— Example ${i + 1} —\n${e}`).join('\n')}` : ''}`
+    ? `\n\nTHE AGENT'S OWN STYLE — HIGHEST PRIORITY. Follow these exactly; they override any default tone/length/emoji/hashtag guidance below where they conflict. They do NOT override the LISTING FACTS below — a style governs how this listing is presented, never what is true about it:\n${styleRules || '(no written rules — match the examples)'}${styleExamples.length ? `\n\nMatch the voice, length and formatting of these example captions the agent wrote:\n${styleExamples.map((e, i) => `— Example ${i + 1} —\n${e}`).join('\n')}\n${exampleContract}` : ''}`
     : ''
 
   // Spell the price out as ONE asking price with an explicit prohibition, rather
@@ -117,8 +145,44 @@ export function buildContentPrompt(listing, platformIds, languageIds, styleGuide
       ? `PROPERTY NAME (best guess from the listing text): ${propName} — if this really is the building's name, keep it in the caption near the top. If it is only an area, a landmark or a person's name, ignore this line.`
       : null
 
+  // THE TRANSACTION, SPELLED OUT.
+  //
+  // This line used to read "Listing type: Rental (monthly)" — true, accurate,
+  // and completely outranked by a style example that said "💰 Selling Price" in
+  // 48-point letters at the top of the template. A fact beats a style rule only
+  // when the fact says what to WRITE; "Rental (monthly)" says what it is and
+  // leaves the wording to the example. So it now names the words on both sides.
+  //
+  // The sale half deliberately protects the tenanted listing: a sale that states
+  // its current rent or its yield is the commonest listing in this market, and
+  // an instruction that simply banned rent words would strip the agent's own
+  // strongest number. Same failure, other direction.
+  // "IT IS NOT FOR RENT" IS A FACT WE DO NOT HAVE.
+  //
+  // This read `listingType === 'rental' ? RENTAL : SALE`, so a listing that
+  // named NEITHER was handed the SALE branch — "this property is FOR SALE",
+  // stated in the FACTS block, which this file's own comments record as beating
+  // any style rule. demoParse() was deliberately changed to return null instead
+  // of guessing between the two (`rental ? 'rental' : 'sale'` typed a listing
+  // mentioning neither as a SALE); that fix is undone the moment the prompt
+  // asserts SALE anyway, in the strongest language in the prompt.
+  //
+  // Unknown now gets its own branch that states the absence and forbids the
+  // model from resolving it. Both known branches are untouched.
+  const txnTag = transactionTag(listing)
+  const isRental = txnTag === 'FOR RENT'
+  const txnUnknown = txnTag === ''
+  const txnLine = txnUnknown
+    ? `Listing type: NOT STATED — the listing never says whether this property is for sale or for rent, so NEITHER of us knows.
+  TRANSACTION WORDING: do not resolve it. Never write "For Sale", "Selling Price", "Asking Price", "#..._Sale", 出售, 售价, dijual, NOR "For Rent", "To Let", "Monthly Rent", "/month", "#..._Rent", 出租, disewa. State the price as the listing states it and nothing more, and write a call to action that works either way ("Message me for details"). Guessing here puts a false claim about how somebody's home is being sold on their own page.`
+    : isRental
+    ? `Listing type: RENTAL — this property is FOR RENT. It is NOT for sale.
+  TRANSACTION WORDING: every word about the deal says RENT — "For Rent", "Monthly Rent"/"Rental Price" as the price heading, "/month" on the figure, a rent hashtag ("#..._Rent"). NEVER write "Selling Price", "Sale Price", "For Sale", "Why Buy", "Buy this", "Purchase", "Own this", "#..._Sale", 出售, 售价, dijual or harga jual about this property — not in a heading, not in a hashtag, not in a call to action, however an example caption words it.`
+    : `Listing type: SALE — this property is FOR SALE. It is NOT for rent.
+  TRANSACTION WORDING: every word about the deal says SALE — "For Sale", "Selling Price"/"Asking Price" as the price heading, a sale hashtag ("#..._Sale"). NEVER present the property itself as a rental: no "For Rent", "To Let", "#..._Rent", 出租, disewa, and never label the ASKING PRICE as a monthly rent. If the listing states a CURRENT TENANCY, a rental income or a yield, KEEP that figure and label it as what it is ("Currently tenanted at RM1,300/month", "gross ROI 4.62%") — it is a fact about a property that is for sale, and it is the agent's strongest number.`
+
   const facts = [
-    `Listing type: ${listing.listingType === 'rental' ? 'Rental (monthly)' : 'Sale'}`,
+    txnLine,
     nameLine,
     priceLine,
     // The listing's own words for where it is, and nothing appended. This used to
@@ -187,6 +251,11 @@ YOUR JOB, EXACTLY:
    ordering and sign-off. THIS is where you make it better — a sharper
    headline, better ordering, cleaner structure, their strongest number given
    the most weight. Better presentation of THEIR facts, never more facts.
+   The FORMAT is the agent's; the TRANSACTION is this listing's. If their
+   template heads the price "💰 Selling Price" and this listing is a rental,
+   that heading becomes "💰 Monthly Rent" — same emoji, same line, same place.
+   Never let a template's wording say this property is for sale when it is for
+   rent, or for rent when it is for sale.
 4. ALWAYS keep the phone number from the source, exactly as written. Measured:
    with a softer rule the number survived only 2 rewrites in 6 — an advert with
    no phone number is a broken advert. If the style has its own sign-off line,
@@ -195,7 +264,16 @@ YOUR JOB, EXACTLY:
    MUST appear in your caption: the property NAME · every RM figure (asking
    price, monthly rental, ANNUAL rental, savings/below-value) · size · yield or
    ROI · every named nearby place, amenity and travel time · the phone number.
-   Re-read the source and confirm each one is present before returning.`
+   Re-read the source and confirm each one is present before returning.
+6. Last check, on the transaction: ${txnUnknown
+    ? `the listing never says whether this is a sale or a rental, so YOU must not
+   say either. No "For Sale", no "For Rent", no "Selling Price", no "Monthly
+   Rent", no #..._Sale or #..._Rent. Describe the property and give the figure
+   exactly as the listing gave it.`
+    : `read your caption back and confirm that every
+   heading, hashtag and call to action says ${isRental ? 'RENT' : 'SALE'}, because this listing is
+   ${isRental ? 'a RENTAL' : 'a SALE'}. One "${isRental ? 'Selling Price' : 'For Rent'}" left over from a template is a false
+   advert about somebody else's property.`}`
     : ''
 
   const lengthRule = styleActive
@@ -244,6 +322,12 @@ REPRODUCE THAT FORMAT. The layout, emoji placement, CAPS, dividers and blank-lin
 spacing must match the examples in STRUCTURE — not just in tone. This overrides
 every craft note below where they conflict; if the style is a rigid template,
 follow the template.
+
+REPRODUCE THE FORMAT, NOT THE OTHER LISTING. The template is theirs; the facts
+are this listing's — the transaction (sale vs rental), the price, the size, the
+name and the hashtags all come from LISTING FACTS below. A rigid template you
+follow word-for-word onto a property of the other type is not a match, it is a
+false advert.
 
 `
     : ''
@@ -302,6 +386,12 @@ ${platforms.map((p) => `  "${p.id}": { ${languages.map((l) => `"${l.id}": "..."`
 
 /** REEL: a punchy TikTok voiceover script + short caption for a listing. */
 export function buildReelPrompt(listing, styleGuide, rules) {
+  // The reel gets the same transaction rule as the caption: an unstated sale /
+  // rental is never resolved to "For sale". The reel is the worse place for it
+  // — the script is SPOKEN and the pill is burned into the MP4.
+  const txnTag = transactionTag(listing)
+  const isRental = txnTag === 'FOR RENT'
+  const txnUnknown = txnTag === ''
   // A reel is the agent's advert too. It used to receive neither their trained
   // style nor the rules they had taught the system, so an agent could correct
   // the caption a dozen times and the reel would keep making the same mistake -
@@ -315,7 +405,9 @@ export function buildReelPrompt(listing, styleGuide, rules) {
     ? `\nTHE AGENT'S VOICE — match this tone (the reel is spoken, so adapt the format, keep the voice):\n${String(styleGuide.style).slice(0, 1200)}\n`
     : ''
   const facts = [
-    `Type: ${listing.listingType === 'rental' ? 'For rent (monthly)' : 'For sale'}`,
+    // Same rule as buildContentPrompt: an unstated transaction is stated as
+    // absent, never resolved to "For sale".
+    txnUnknown ? null : `Type: ${isRental ? 'For rent (monthly)' : 'For sale'}`,
     listing.price != null && `Price: RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? '/month' : ''}`,
     // The listing's own words for where it is, and nothing appended. This used to
     // read `${listing.location}, Kuching, Sarawak` — so a Johor listing was handed
@@ -362,7 +454,7 @@ ${facts}
 "Ready to invest in Kuching? #KuchingProperty #Sarawak" — a viewer learned
 nothing, and TikTok captions are searchable, so an empty one is a wasted
 listing. Write 3-5 SHORT lines carrying the real details, then 4-6 hashtags:
-- line 1: the property NAME and what it is (for sale / for rent)
+- line 1: the property NAME and what it is — ${txnUnknown ? 'and NOT whether it is for sale or for rent: the listing never says, so say neither, and use no #..._Sale or #..._Rent hashtag' : isRental ? 'FOR RENT (never "for sale", never a #..._Sale hashtag: this is a rental)' : 'FOR SALE (never "for rent", never a #..._Rent hashtag: this is a sale)'}
 - then: the price, the size and beds/baths, and the single strongest number the
   listing gives (below-value saving, rental income or yield) — one per line
 - last line: how to reach the agent
@@ -444,7 +536,11 @@ Return ONLY JSON: {"index": N} where N is the 0-based number of the best cover p
  *  them. OCR, not extraction: the parse prompt above turns text into fields, so
  *  this one only has to read. */
 export function buildReadListingPrompt(count) {
-  return `You are transcribing ${count} image${count === 1 ? '' : 's'} an estate agent in Kuching, Sarawak sent: photos or screenshots of a property listing (a WhatsApp message, a flyer, a poster, a portal page). Read the text out of them.
+  // NO REGION IN THE PROMPT. This said "an estate agent in Kuching, Sarawak",
+  // sent for every tenant on the OCR path — the same geographic assertion that
+  // was removed from the FACTS block and the reel. The hard rules below already
+  // forbid adding an area name; naming one in the framing works against them.
+  return `You are transcribing ${count} image${count === 1 ? '' : 's'} a Malaysian estate agent sent: photos or screenshots of a property listing (a WhatsApp message, a flyer, a poster, a portal page). Read the text out of them.
 
 You are a TRANSCRIBER, not a copywriter and not an analyst. Transcribe what is visibly written. Nothing else.
 

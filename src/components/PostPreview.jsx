@@ -93,7 +93,12 @@ function ListingCard({ listing, text, platform, videoUrl }) {
       <div className="pv-listing-body">
         <div className="pv-listing-price">{formatPrice(listing.price, listing.listingType)}</div>
         <div className="pv-listing-title">{listingLabel(listing)}</div>
-        <div className="pv-listing-loc">📍 {listing.location || 'Kuching'}, Sarawak</div>
+        {/* The listing's own words for where it is, and nothing appended. This
+            read `{listing.location || 'Kuching'}, Sarawak`, so a listing with no
+            area showed Kuching and a Johor Bahru listing showed "Johor Bahru,
+            Sarawak". This is the card the agent checks the post against before
+            they publish, so a wrong line here is a wrong line they sign off. */}
+        {listing.location && <div className="pv-listing-loc">📍 {listing.location}</div>}
         {specs.length > 0 && <div className="pv-listing-specs">{specs.map((s, i) => <span key={i}>{s}</span>)}</div>}
         <pre className="pv-text pv-listing-desc">{text}</pre>
       </div>

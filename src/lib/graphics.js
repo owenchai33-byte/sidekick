@@ -4,6 +4,7 @@
 // and the "Download whole kit" bundler so every asset shares one visual system.
 import { formatPrice, listingLabel } from './format.js'
 import { statusBanner } from './marketStatus.js'
+import { transactionTag } from '../../shared/txn.js'
 
 export const SIZES = { square: [1080, 1080], story: [1080, 1920], portrait: [1080, 1350] }
 
@@ -174,17 +175,25 @@ export function drawCard(ctx, W, H, listing, brand, photo, logo) {
   ctx.fillStyle = top
   ctx.fillRect(0, 0, W, 240)
 
+  // NO PILL WHEN THE TRANSACTION IS UNKNOWN. This read `=== 'rental' ? FOR RENT
+  // : FOR SALE`, so a listing that never said which was stamped FOR SALE — the
+  // same class as the hardcoded Kuching, and burned into the exported JPEG
+  // where it cannot be edited or repaired afterwards. api/_lib/brandcard.js (the
+  // server twin) was fixed on 2026-09-05; this one was not, and this is the one
+  // PropertyGraphic, the carousel and the "download whole kit" bundler export.
   const banner = statusBanner(listing)
-  const label = banner ? banner.text : (listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE')
-  ctx.font = '700 34px Inter, system-ui, sans-serif'
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'left'
-  const bw = ctx.measureText(label).width + 48
-  roundRect(ctx, pad, pad, bw, 62, 31)
-  ctx.fillStyle = banner ? banner.color : color
-  ctx.fill()
-  ctx.fillStyle = '#fff'
-  ctx.fillText(label, pad + 24, pad + 33)
+  const label = banner ? banner.text : transactionTag(listing)
+  if (label) {
+    ctx.font = '700 34px Inter, system-ui, sans-serif'
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    const bw = ctx.measureText(label).width + 48
+    roundRect(ctx, pad, pad, bw, 62, 31)
+    ctx.fillStyle = banner ? banner.color : color
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, pad + 24, pad + 33)
+  }
 
   drawBrandBar(ctx, W, H, brand, logo)
 
@@ -245,12 +254,18 @@ function drawBrandBar(ctx, W, H, brand, logo) {
     ctx.textBaseline = 'middle'
     ctx.fillText(initials(brand.agency || brand.name), mx + ms / 2, my + ms / 2 + 2)
   }
-  const bname = brand.agency || brand.name || 'SideKick Property'
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#fff'
-  ctx.font = '700 32px Inter, system-ui, sans-serif'
-  ctx.fillText(bname, mx + ms + 22, by + barH / 2)
+  // NEVER PUT SOMEBODY ELSE'S COMPANY NAME ON A CLIENT'S ADVERT. dataStore.js
+  // ships brand as { agency: '', name: '' }, so every agent who has not filled
+  // in Settings had "SideKick Property" — our name, not theirs — burned into
+  // the card they publish. An unbranded bar is a bar with no name on it.
+  const bname = brand.agency || brand.name || ''
+  if (bname) {
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = '#fff'
+    ctx.font = '700 32px Inter, system-ui, sans-serif'
+    ctx.fillText(bname, mx + ms + 22, by + barH / 2)
+  }
   if (brand.phone) {
     ctx.textAlign = 'right'
     ctx.font = '600 30px Inter, system-ui, sans-serif'
@@ -347,12 +362,16 @@ export function renderCarousel({ listing, brand, photos, logo }) {
       drawScrims(ctx, S)
 
       if (slide.type === 'cover') {
-        const label = listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE'
-        ctx.font = '700 34px Inter, system-ui, sans-serif'
-        ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
-        const bw = ctx.measureText(label).width + 48
-        roundRect(ctx, pad, pad, bw, 62, 31); ctx.fillStyle = color; ctx.fill()
-        ctx.fillStyle = '#fff'; ctx.fillText(label, pad + 24, pad + 33)
+        // Same rule as drawCard: an unknown transaction gets NO pill, never a
+        // guessed FOR SALE burned into the carousel's first slide.
+        const label = transactionTag(listing)
+        if (label) {
+          ctx.font = '700 34px Inter, system-ui, sans-serif'
+          ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
+          const bw = ctx.measureText(label).width + 48
+          roundRect(ctx, pad, pad, bw, 62, 31); ctx.fillStyle = color; ctx.fill()
+          ctx.fillStyle = '#fff'; ctx.fillText(label, pad + 24, pad + 33)
+        }
 
         // Stacked bottom-left: price (hero), specs, then title above.
         // Gaps are baseline-to-baseline; keep them larger than the font's cap
@@ -451,7 +470,8 @@ export function renderCarousel({ listing, brand, photos, logo }) {
       for (const line of sub) { ctx.fillText(line, S / 2, sy); sy += 50 }
 
       // contact pill
-      const who = brand.name || brand.agency || 'SideKick Property'
+      // Our name is not the client's name — see drawBrandBar.
+      const who = brand.name || brand.agency || ''
       if (brand.phone) {
         ctx.font = '800 40px Inter, system-ui, sans-serif'
         const t = 'WhatsApp  ' + brand.phone
@@ -491,6 +511,8 @@ function drawMiniBrand(ctx, S, brand, logo, textColor) {
   }
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
   ctx.fillStyle = textColor; ctx.font = '700 30px Inter, system-ui, sans-serif'
-  ctx.fillText(brand.agency || brand.name || 'SideKick Property', pad + ms + 18, y + ms / 2 + 1)
+  // Our name is not the client's name — see drawBrandBar.
+  const cname = brand.agency || brand.name || ''
+  if (cname) ctx.fillText(cname, pad + ms + 18, y + ms / 2 + 1)
   ctx.textBaseline = 'alphabetic'
 }

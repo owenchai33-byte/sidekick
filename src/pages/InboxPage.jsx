@@ -36,7 +36,12 @@ export default function InboxPage() {
     const f = d.fields || {}
     const listing = {
       id: newId(), agentId: settings.agent?.id,
-      listingType: f.listingType || 'sale',
+      // NOT A SALE JUST BECAUSE NOBODY SAID. demoParse() returns null for a
+      // listing that names neither, deliberately — and this line put the guess
+      // straight back, with no control in the UI for the agent to correct it.
+      // The listing it writes then feeds the card pill, the reel pill and the
+      // FACTS block handed to the model.
+      listingType: f.listingType || null,
       price: f.price != null && f.price !== '' ? Number(f.price) : null,
       location: f.location || null, bedrooms: f.bedrooms ?? null, bathrooms: f.bathrooms ?? null,
       propertyType: f.propertyType || null, sqft: f.sqft ?? null, tenure: f.tenure || null, furnishing: f.furnishing || null,

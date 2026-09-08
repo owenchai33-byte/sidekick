@@ -33,6 +33,15 @@ function PlatformGlyph({ id, color }) {
   )
 }
 
+// The provider already returns "@walauwilson100". Prefixing another @ printed
+// "@@walauwilson100" on the client's own connect page — small, but it is the
+// first screen an agent ever sees.
+function handle(username) {
+  const u = String(username || '').trim()
+  if (!u) return ''
+  return u.startsWith('@') ? u : `@${u}`
+}
+
 export default function ConnectPage() {
   const [profile, setProfile] = useState(readProfile) // per-agent link scopes to their profile
   useEffect(() => {
@@ -47,14 +56,64 @@ export default function ConnectPage() {
   const [busy, setBusy] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
+  const [returnedEmpty, setReturnedEmpty] = useState('')
+  const [callbackError, setCallbackError] = useState('')
+
+  // WHATEVER THE CALLBACK SAYS, SAY IT.
+  //
+  // This page never looked at the URL it was returned to — no location.search,
+  // no URLSearchParams anywhere — so every message the provider sent back was
+  // discarded and the agent saw the Connect button again with no explanation.
+  // Both places are read because the app is hash-routed: the provider's params
+  // can land before the # or after it, depending on how it builds the redirect.
+  useEffect(() => {
+    const keys = ['error_description', 'error_message', 'error_reason', 'error', 'message', 'reason']
+    const grab = (qs) => {
+      for (const k of keys) {
+        const v = qs.get(k)
+        if (v && v.trim() && !/^(0|false|none|null)$/i.test(v.trim())) return v.trim()
+      }
+      return ''
+    }
+    let found = grab(new URLSearchParams(window.location.search))
+    if (!found) {
+      const h = window.location.hash || ''
+      const i = h.indexOf('?')
+      if (i !== -1) found = grab(new URLSearchParams(h.slice(i + 1)))
+    }
+    if (!found) return
+    setCallbackError(found.replace(/\+/g, ' ').slice(0, 300))
+    // Cleared from the address bar so a refresh does not re-accuse.
+    try {
+      const url = new URL(window.location.href)
+      for (const k of keys) url.searchParams.delete(k)
+      window.history.replaceState({}, '', url.toString())
+    } catch { /* older browsers: leave it */ }
+  }, [])
 
   const load = useCallback(async () => {
     try {
       const r = await fetch('/api/social-accounts' + (q ? `?${q}` : ''))
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Failed to load accounts')
-      setAccounts(j.accounts || [])
+      const list = j.accounts || []
+      setAccounts(list)
       setError('')
+      // WHY DID NOTHING HAPPEN? Authorising and coming back with no account
+      // attached produced no error anywhere: the fetch succeeded, the redirect
+      // succeeded, and the agent simply saw the same "Connect" button. For
+      // Facebook that is the NORMAL outcome when they have no Page — Meta
+      // removed personal-profile posting years ago, and every scope this asks
+      // for (pages_show_list, pages_manage_posts, …) is a Page scope. Wilson
+      // connected Instagram and TikTok and stalled here with nothing to read.
+      try {
+        const tried = sessionStorage.getItem('sk_connecting')
+        if (tried) {
+          sessionStorage.removeItem('sk_connecting')
+          if (!list.some((a) => a.platform === tried)) setReturnedEmpty(tried)
+          else setReturnedEmpty('')
+        }
+      } catch { /* private mode */ }
     } catch (e) { setError(e.message); setAccounts([]) }
   }, [q])
 
@@ -80,6 +139,10 @@ export default function ConnectPage() {
   async function connect(platform) {
     setBusy(platform)
     setError('')
+    // Remembered across the redirect so that, on the way back, we can tell the
+    // difference between "they cancelled" and "it completed and attached
+    // nothing" — which is what a Facebook account with no Page does, silently.
+    try { sessionStorage.setItem('sk_connecting', platform) } catch { /* private mode */ }
     try {
       const r = await fetch(`/api/social-connect?platform=${platform}&origin=${encodeURIComponent(window.location.origin)}${q ? `&${q}` : ''}`)
       const j = await r.json()
@@ -89,7 +152,7 @@ export default function ConnectPage() {
   }
 
   async function disconnect(acct) {
-    if (!window.confirm(`Disconnect @${acct.username} (${acct.platform})? You can reconnect anytime.`)) return
+    if (!window.confirm(`Disconnect ${handle(acct.username)} (${acct.platform})? You can reconnect anytime.`)) return
     setBusy(acct.platform)
     setError('')
     try {
@@ -151,7 +214,7 @@ export default function ConnectPage() {
               <div className="connect-info">
                 <div className="connect-name">{p.name}</div>
                 {acct ? (
-                  <div className="connect-status ok">✓ Connected · @{acct.username}</div>
+                  <div className="connect-status ok">✓ Connected · {handle(acct.username)}</div>
                 ) : (
                   <div className="connect-status muted">{p.blurb}</div>
                 )}
@@ -169,6 +232,41 @@ export default function ConnectPage() {
           )
         })}
       </div>
+
+      {callbackError && (
+        <div className="connect-note" style={{ marginTop: 16 }}>
+          <strong>Facebook sent this back:</strong> {callbackError}
+        </div>
+      )}
+      {returnedEmpty === 'facebook' && (
+        <div className="connect-note" style={{ marginTop: 16 }}>
+          <strong>Facebook finished, but no Page came back.</strong> Posting to a
+          personal profile isn't something Facebook allows any more, so this asks
+          for permission to post to a <em>Page</em> you manage. Three things stop
+          a Page appearing:
+          <br /><br />
+          <strong>1. You weren't shown a Page to tick.</strong> Facebook leaves them
+          unticked by default — go through again and make sure your Page is
+          selected before you continue.
+          <br /><br />
+          <strong>2. You're not a full admin of it.</strong> Editor or Moderator
+          isn't enough to grant posting.
+          <br /><br />
+          <strong>3. The Page belongs to a Business Portfolio.</strong> Pages held
+          in Meta Business Suite often don't appear in this list. Try connecting
+          while signed in to the personal account that owns the Page, and tell
+          Owen if it still doesn't show — that one needs a change on our side, not
+          yours.
+          <br /><br />
+          No Page at all? Create one — it's free and can carry your own name.
+        </div>
+      )}
+      {returnedEmpty && returnedEmpty !== 'facebook' && (
+        <div className="connect-note" style={{ marginTop: 16 }}>
+          That didn't finish — nothing was connected. Tap Connect to try again,
+          and allow every permission it asks for.
+        </div>
+      )}
 
       {accounts === null && <p className="muted" style={{ textAlign: 'center', marginTop: 20 }}>Loading…</p>}
 
@@ -197,6 +295,12 @@ export default function ConnectPage() {
         .glyph { flex: none; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; }
         .connect-info { flex: 1; min-width: 0; }
         .connect-name { font-weight: 700; font-size: 15px; }
+        .connect-note {
+          border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+          font-size: 13.5px; line-height: 1.55; color: var(--ink-700);
+          background: var(--surface);
+        }
+        .connect-note strong { color: var(--ink-900); }
         .connect-status { font-size: 13px; margin-top: 2px; }
         .connect-status.ok { color: var(--green-700); font-weight: 600; }
         @media (prefers-color-scheme: dark) { .connect-status.ok { color: var(--green-400); } }

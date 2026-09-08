@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from 'react'
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer'
 import { formatPrice, listingLabel } from '../lib/format.js'
-import { listingPhotos } from '../lib/photos.js'
+import { transactionTag } from '../../shared/txn.js'
+import { realPhotos } from '../lib/photos.js'
 import { shareToApps, shareFiles } from '../lib/share.js'
 import { putVideo, getVideoUrl } from '../lib/media.js'
 
@@ -125,15 +126,27 @@ function pill(ctx, cx, cy, str, font, tracking, textColor, alpha, scale = 1) {
   ctx.restore()
 }
 
+// Exported for api/_lib/no-guessed-transaction.test.mjs and
+// no-invented-region.test.mjs, which drive these against a recording canvas
+// context: the pill and the location subtitle are burned into the encoded MP4,
+// so the only way to assert what a client's reel says is to render it.
 // Build the beat list: intro (price) → one fact per beat → outro (contact).
-function buildBeats(listing, photos) {
+export function buildBeats(listing, photos) {
   const stats = []
   if (listing.bedrooms != null) stats.push({ big: String(listing.bedrooms), small: listing.bedrooms == 1 ? 'Bedroom' : 'Bedrooms' })
   if (listing.bathrooms != null) stats.push({ big: String(listing.bathrooms), small: listing.bathrooms == 1 ? 'Bathroom' : 'Bathrooms' })
   if (listing.sqft != null) stats.push({ big: Number(listing.sqft).toLocaleString('en-MY'), small: 'sq ft built-up' })
   if (listing.tenure) stats.push({ big: listing.tenure, small: 'Tenure' })
   if (listing.furnishing) stats.push({ big: listing.furnishing, small: null })
-  if (listing.location) stats.push({ big: listing.location, small: 'Kuching, Sarawak' })
+  // NO SUBSTITUTE REGION. This read `small: 'Kuching, Sarawak'`, and because it
+  // fires only when the location IS known it was guaranteed to contradict the
+  // listing for every property outside Kuching: a Miri listing rendered the
+  // frame ["Miri","KUCHING, SARAWAK"], a Kota Kinabalu one claimed Sabah was in
+  // Sarawak. Burned into the encoded MP4 on a client's TikTok/IG, with no model
+  // in the loop, so nothing downstream could ever have caught it — the same
+  // `${location}, Kuching, Sarawak` that prompts.js removed from the FACTS
+  // block, surviving in the video. The town the listing gave stands alone.
+  if (listing.location) stats.push({ big: listing.location, small: null })
   if (stats.length === 0) stats.push({ big: 'Enquire', small: 'for full details' })
 
   const beats = [{ kind: 'intro' }, ...stats.map((s) => ({ kind: 'stat', ...s })), { kind: 'outro' }]
@@ -228,10 +241,14 @@ function drawScene(ctx, beat, t, groupAlpha, slideX, D, A) {
   ctx.restore()
 }
 
-function introScene(ctx, beat, D, A, rise) {
+export function introScene(ctx, beat, D, A, rise) {
   const { listing } = D, cx = W / 2
   const a = rise(0, 460), b = rise(140, 560), c = rise(300, 560)
-  pill(ctx, cx, H / 2 - 214 + a.y, listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE', '800 38px Inter, sans-serif', 3, A, a.a, a.s)
+  // NO PILL WHEN THE TRANSACTION IS UNKNOWN — same rule as the card, and here
+  // it is spoken over and encoded into the MP4. A listing that named neither a
+  // sale nor a rental opened its reel with FOR SALE.
+  const tag = transactionTag(listing)
+  if (tag) pill(ctx, cx, H / 2 - 214 + a.y, tag, '800 38px Inter, sans-serif', 3, A, a.a, a.s)
   ctx.save(); ctx.translate(0, b.y)
   label(ctx, formatPrice(listing.price, listing.listingType), cx, H / 2 + 20, fitFont(ctx, formatPrice(listing.price, listing.listingType), 800, 132, W - 140), '#fff', b.a, 'center')
   ctx.restore()
@@ -245,7 +262,7 @@ function introScene(ctx, beat, D, A, rise) {
   ctx.restore()
 }
 
-function statScene(ctx, beat, D, A, rise) {
+export function statScene(ctx, beat, D, A, rise) {
   const baseY = H - 250
   const a = rise(0, 520), b = rise(130, 560)
   // accent bar grows up from the number's baseline
@@ -289,7 +306,7 @@ function outroScene(ctx, beat, D, A, rise) {
   }
 }
 
-function brandBar(ctx, D) {
+export function brandBar(ctx, D) {
   const { brand, logo, color } = D
   const barH = 128, by = H - barH
   const g = ctx.createLinearGradient(0, by, 0, H)
@@ -300,7 +317,11 @@ function brandBar(ctx, D) {
   else { ctx.beginPath(); ctx.arc(mx + ms / 2, my + ms / 2, ms / 2, 0, 7); ctx.fillStyle = color; ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = '800 30px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(initials(brand.agency || brand.name), mx + ms / 2, my + ms / 2 + 1) }
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.font = '700 34px Inter, sans-serif'
   ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 10
-  ctx.fillText(brand.agency || brand.name || 'SideKick Property', mx + ms + 22, my + ms / 2 + 1)
+  // OUR name burned into a CLIENT's reel. dataStore ships brand as empty
+  // strings, so every agent who never opened Settings published a video
+  // captioned "SideKick Property" — a company that is not theirs.
+  const bname = brand.agency || brand.name || ''
+  if (bname) ctx.fillText(bname, mx + ms + 22, my + ms / 2 + 1)
 }
 
 function render(ctx, t, beats, D) {
@@ -357,7 +378,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     window.__pvidFrame = async (sec) => {
-      const photos = (await Promise.all(listingPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
+      const photos = (await Promise.all(realPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
       const logo = await loadImage(brand.logo)
       const { beats, total } = buildBeats(listing, photos)
       const D = { listing, brand, photos, logo, color: brand.color || '#2d6a4f', total }
@@ -373,7 +394,7 @@ export default function PropertyVideo({ listing, brand, onVideo }) {
   async function generate() {
     setStatus('rendering'); setProgress(0); setUrl(null)
     try {
-      const photos = (await Promise.all(listingPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
+      const photos = (await Promise.all(realPhotos(listing).slice(0, MAX_PHOTOS).map(loadImage))).filter(Boolean)
       const logo = await loadImage(brand.logo)
       const color = brand.color || '#2d6a4f'
       const { beats, total } = buildBeats(listing, photos)

@@ -79,7 +79,19 @@ export default async function handler(req, res) {
     try { accounts = await connectedAccounts(profile) } catch { accounts = null }
   }
 
-  const [posts, pending] = await Promise.all([readFeed(30), listPending(20)])
+  // `limit` WAS ACCEPTED AND IGNORED, AND THE CAP MADE A STUCK PENDING INVISIBLE.
+  //
+  // Four callers in tools/sidekick.mjs pass one — retire asks for 100, cover and
+  // caption for 30, status for 10 — and every one of them got 20. listPending()
+  // sorts NEWEST FIRST, and `retire` selects the OLDEST, so the single command
+  // that can clear a stuck pending could only ever see the 20 newest records.
+  // Production is carrying 12 today, 11 of them belonging to profiles nobody is
+  // mapped to; past 20 those become permanently unreachable by the only tool
+  // that clears them, which is how a backlog like that accumulates in the first
+  // place. Bounded at 100 because that is listPending()'s own blob page size.
+  const asked = Number(q.get('limit'))
+  const want = Number.isFinite(asked) && asked > 0 ? Math.min(Math.trunc(asked), 100) : 20
+  const [posts, pending] = await Promise.all([readFeed(30), listPending(want)])
 
   const myPending = authed ? pending : (profile ? pending.filter((p) => p?.profileId === profile) : [])
   const myPosts = authed ? posts : (profile ? posts.filter((p) => p?.profileId === profile) : [])

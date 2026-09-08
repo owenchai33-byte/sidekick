@@ -64,7 +64,15 @@ const bothWays = async (text, caption) => {
   // when the provider is out of budget; the content call returns the caption.
   providers.extractJson
     .mockImplementationOnce(() => { throw new Error('no json') })
-    .mockReturnValue({ caption })
+    // THE SHAPE writeCaption() ACTUALLY READS. This returned `{ caption }`,
+    // which has no `facebook_page` key — so `parts` came back empty and every
+    // case in this file ran with caption = "" (verified 2026-09-06). The
+    // "genuinely reaches the new check" counter below was therefore counting
+    // EMPTY captions that published clean, which is the ingest.js money-omission
+    // bug rather than a property of this corpus. With the real caption in the
+    // real shape all eight publish clean on the pre-fix gate too, so this is the
+    // measurement being repaired, not the threshold being lowered.
+    .mockReturnValue({ facebook_page: { en: caption } })
   await call(ingestHandler, '/api/ingest', { profileId: 'p1', text, images: ['https://cdn.test/photo1.jpg'] })
   const rec = heldRecord()
 

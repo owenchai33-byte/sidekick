@@ -50,18 +50,47 @@ export function ownershipVerdict({ claimProfile, claimSender, item }) {
     { field: 'sender', claim: normalizeSender(claimSender), record: normalizeSender(item?.sender) },
   ].filter((c) => c.claim && c.record)
 
-  const bad = comparisons.find((c) => c.claim !== c.record)
-  if (bad) {
-    return { verdict: 'mismatch', field: bad.field, reason: `the ${bad.field} on this record is not the one the caller claims` }
+  // ONE MATCHING FIELD IS ENOUGH; it takes ALL of them disagreeing to be a
+  // stranger.
+  //
+  // This used to refuse on the FIRST mismatch, which made a re-onboarded agent a
+  // stranger to their own held posts: onboarding mints a NEW profile id and
+  // their phone does not change, so profileId disagreed, sender agreed, and they
+  // could neither publish nor discard their own work. The escape hatch added for
+  // it — a forced skip that ignored ownership entirely — let any holder of the
+  // shared INGEST_SECRET discard ANY tenant's post at any age, which is a silent
+  // refusal wearing a convenience's clothes.
+  //
+  // Matching on either field closes both: the agent keeps their phone, so the
+  // record is theirs; a stranger matches neither, so it is refused.
+  const agreeing = comparisons.filter((c) => c.claim === c.record)
+  const disagreeing = comparisons.filter((c) => c.claim !== c.record)
+  if (agreeing.length) {
+    return {
+      // One matching field identifies the post as theirs — enough to DISCARD it.
+      verdict: 'match',
+      field: agreeing[0].field,
+      // Every comparable field agreeing is what it takes to PUBLISH. Sending a
+      // post to the wrong accounts is unrecoverable; declining to delete one is
+      // not, so the two verbs do not get the same bar. Measured case for the
+      // strict half: a record owned by MY profile but THEIR phone, approved with
+      // a claim of my profile and my phone — profile agrees, phone does not, and
+      // publishing it would post their listing to my accounts.
+      strict: disagreeing.length === 0,
+      reason: null,
+    }
   }
-  const good = comparisons[0]
-  if (good) return { verdict: 'match', field: good.field, reason: null }
+  const bad = comparisons[0]
+  if (bad) {
+    return { verdict: 'mismatch', field: bad.field, strict: false, reason: `the ${bad.field} on this record is not the one the caller claims` }
+  }
 
   // Why the comparison could not be made, in words, so the caller can say it.
   const claimed = str(claimProfile) || normalizeSender(claimSender)
   return {
     verdict: 'unknown',
     field: null,
+    strict: true,   // nothing to contradict: an untagged record behaves as it always did
     reason: claimed
       ? 'this record carries no owner to check the claim against (it predates tenant tagging)'
       : 'the caller did not say who it is acting for',

@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext.jsx'
 import { generateContent } from '../lib/ai.js'
 import { evaluateRules } from '../lib/rules.js'
 import { formatPrice, listingLabel } from '../lib/format.js'
-import { listingPhotos, coverPhoto } from '../lib/photos.js'
+import { listingPhotos, coverPhoto, publishPhotos, publishCover } from '../lib/photos.js'
 import { captionFor } from '../lib/social.js'
 import { tenantFields } from '../lib/tenant.js'
 import { MARKET_STATUSES, isHighlightStatus } from '../lib/marketStatus.js'
@@ -93,7 +93,18 @@ export default function ListingDetailPage() {
         if (blob) { mediaUrl = await uploadMedia(blob, v.name); mediaType = 'video' }
       }
       if (!mediaUrl) {
-        const [photo, logo] = await Promise.all([loadImage(coverPhoto(listing)), loadImage(settings.brand?.logo)])
+        // publishCover, NOT coverPhoto. coverPhoto falls back to a seed
+        // photograph of a DIFFERENT property, and this is the app's primary
+        // Post button — straight to /api/social-broadcast and the agent's real
+        // accounts. Refusing here is loud and recoverable; publishing a
+        // stranger's condo under a client's name is neither.
+        const cover = publishCover(listing)
+        if (!cover) {
+          toast('Add a photo of this property first — I won\'t post it with a stock picture.')
+          setPosting(false)
+          return
+        }
+        const [photo, logo] = await Promise.all([loadImage(cover), loadImage(settings.brand?.logo)])
         const canvas = renderGraphicCanvas({ listing, brand: settings.brand, format: 'square', photo, logo })
         const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92))
         mediaUrl = await uploadMedia(blob, `${listing.id}-graphic.jpg`)
@@ -454,7 +465,7 @@ export default function ListingDetailPage() {
             listing={listing}
             lang={lng}
             text={langMap[lng] || ''}
-            photos={listingPhotos(listing)}
+            photos={publishPhotos(listing)}
             videos={listing.videos || []}
             onClose={() => setQueue(null)}
             onPublished={() => markPublished(pid, lng)}

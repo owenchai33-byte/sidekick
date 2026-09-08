@@ -1,10 +1,14 @@
+import { isRentalType } from '../../shared/txn.js'
 // Price is the hero data (§9) — format it consistently, with tabular numerals.
 
 export function formatPrice(value, listingType) {
   if (value == null || value === '' || Number.isNaN(Number(value))) return '—'
   const n = Number(value)
   const formatted = 'RM' + n.toLocaleString('en-MY')
-  return listingType === 'rental' ? `${formatted}/mo` : formatted
+  // `=== 'rental'` while shared/txn.js accepts sewa / 出租 / RENTAL, so a card
+  // could show FOR RENT and an asking-price-shaped figure at once: RM1,800/month
+  // rendered as "RM1,800". One reader must not be stricter than the other.
+  return isRentalType(listingType) ? `${formatted}/mo` : formatted
 }
 
 export function formatPriceParts(value, listingType) {

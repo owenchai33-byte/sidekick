@@ -39,7 +39,13 @@ export async function renderBrandCard(photoUrl, listing, brand = {}) {
   // boxed rather than left to size itself; a logo that fails to load leaves a
   // gap, never a broken card, because the whole render is already best-effort.
   const logo = String(brand.logo || '').trim()
-  const tag = listing.listingType === 'rental' ? 'FOR RENT' : 'FOR SALE'
+  // NO PILL WHEN THE TRANSACTION IS UNKNOWN. This read `=== 'rental' ? FOR RENT
+  // : FOR SALE`, so a listing that never said which was stamped FOR SALE — the
+  // same class as the hardcoded Kuching, and in the same place: burned into a
+  // JPEG on a client's page, where it cannot be edited or repaired, produced
+  // with no model in the loop so no caption guard would ever see it.
+  const lt = String(listing.listingType || '').toLowerCase()
+  const tag = /rent|sewa|租/.test(lt) ? 'FOR RENT' : (/sale|sell|jual|售/.test(lt) ? 'FOR SALE' : '')
   // NEVER SUBSTITUTE A LOCATION. This said `|| 'Kuching'`, so a Miri, Sibu or
   // Johor property had a Kuching address BURNED INTO THE IMAGE — the one place a
   // wrong fact cannot be edited or repaired afterwards, and produced with no
@@ -51,9 +57,9 @@ export async function renderBrandCard(photoUrl, listing, brand = {}) {
   const tree = h('div', { style: { position: 'relative', width: 1080, height: 1080, display: 'flex', backgroundColor: '#0f1a14', fontFamily: 'Inter' } },
     h('img', { src: photoUrl, width: 1080, height: 1080, style: { position: 'absolute', top: 0, left: 0, width: 1080, height: 1080, objectFit: 'cover' } }),
     h('div', { style: { position: 'absolute', left: 0, bottom: 0, width: 1080, height: 640, display: 'flex', backgroundImage: 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 42%, rgba(0,0,0,0.92) 100%)' } }),
-    h('div', { style: { position: 'absolute', top: 54, left: 56, display: 'flex', paddingTop: 14, paddingBottom: 14, paddingLeft: 30, paddingRight: 30, borderRadius: 999, backgroundColor: accent } },
+    tag ? h('div', { style: { position: 'absolute', top: 54, left: 56, display: 'flex', paddingTop: 14, paddingBottom: 14, paddingLeft: 30, paddingRight: 30, borderRadius: 999, backgroundColor: accent } },
       h('span', { style: { fontSize: 30, fontWeight: 800, color: '#ffffff', letterSpacing: 3 } }, tag),
-    ),
+    ) : null,
     logo ? h('div', { style: { position: 'absolute', top: 48, right: 56, display: 'flex', width: 200, height: 96, alignItems: 'center', justifyContent: 'flex-end' } },
       h('img', { src: logo, style: { maxWidth: 200, maxHeight: 96, objectFit: 'contain' } })) : null,
     h('div', { style: { position: 'absolute', left: 56, right: 56, bottom: 68, display: 'flex', flexDirection: 'column' } },

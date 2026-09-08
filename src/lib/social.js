@@ -2,7 +2,7 @@
 // No Meta developer app — Make owns the approved app; the webhook URL lives
 // server-side in the serverless function.
 
-import { listingPhotos } from './photos.js'
+import { realPhotos } from './photos.js'
 import { uploadMedia, dataUrlToBlob } from './upload.js'
 import { isHighlightStatus, statusCaption } from './marketStatus.js'
 
@@ -12,7 +12,11 @@ import { isHighlightStatus, statusCaption } from './marketStatus.js'
 // on Vercel Blob first — that's also what makes Instagram (which, unlike FB,
 // can't post text-only) work for listings with real uploaded photos.
 async function coverImageUrl(listing) {
-  const src = listingPhotos(listing)[0]
+  // realPhotos(), NOT listingPhotos(). listingPhotos() substitutes a seed
+  // photograph of a DIFFERENT property when the listing has none, and this
+  // function is what hands a URL to Make, Facebook and Instagram. No photo means
+  // no photo — postToSocial() below falls back to a text post, which is honest.
+  const src = realPhotos(listing)[0]
   if (!src) return ''
   if (src.startsWith('data:')) {
     try {

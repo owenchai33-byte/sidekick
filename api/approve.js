@@ -12,7 +12,7 @@
 import { getPending, delPending, claimPending, releasePending } from './_lib/pending.js'
 import { appendFeed } from './_lib/feed.js'
 import { postToConnected } from './_lib/social.js'
-import { captionViolations } from './_lib/postguard.js'
+import { captionViolations, nonMoneyInventions } from './_lib/postguard.js'
 import { ownershipVerdict } from './_lib/tenant.js'
 
 function send(res, status, payload) {
@@ -82,7 +82,10 @@ function readJson(req) {
 // in between: a room count, a yield, a lease term, a facility, a furnishing, a
 // tenure, a distance. Those are the inventions that put a false fact about a real
 // property on a paying client's page, and none of them require doing maths first.
-const MONEY_INVENTION = /^rm\s*[\d.,]/i
+// The exemption itself now lives in postguard.js as nonMoneyInventions(), so
+// the write path (ingest.js) and the publish path cannot drift apart again —
+// they had, and the same caption approve.js would happily publish was marked
+// degraded by ingest.js first.
 function inventedFacts(item) {
   const src = item?.source
   const text = typeof src?.text === 'string' ? src.text.trim() : ''
@@ -93,8 +96,7 @@ function inventedFacts(item) {
   // refusal this guard exists to prevent, wearing a different costume.
   if (!text) return []
   try {
-    const invented = captionViolations(item.caption, { ...src, rawText: text }).invented
-    return invented.filter((v) => !MONEY_INVENTION.test(String(v).trim()))
+    return nonMoneyInventions(captionViolations(item.caption, { ...src, rawText: text }).invented)
   } catch {
     // A guard that throws must not refuse the post. Failing closed here would
     // take out every publish at once with no error anyone ever sees, which is
@@ -108,7 +110,55 @@ function normalizeDecision(d) {
   const s = String(d || '').trim().toLowerCase()
   if (/(approve|post|yes|ya|ok|👍|✅|✔)/.test(s)) return 'approve'
   if (/(skip|no|cancel|reject|👎|❌|✖)/.test(s)) return 'skip'
+  if (s === 'retire') return 'retire'
   return s
+}
+
+// RETIRE — the only way to clear a pending nobody can reach.
+//
+// Ownership refuses BOTH verbs, publish and discard, and that is right for
+// publish: acting on another tenant's post is the thing it exists to stop.
+// Applied to discard it created a trap. Measured 2026-09-06 on production: 11
+// held records carried profile ids of agents no longer mapped —
+// 6a6d5fa0444fb0860526cde7, 6a71927695385c01ffbd2655 — so NO caller could
+// approve them and no caller could skip them either. They sit in the feed
+// forever, and `status` reads that feed, so every "did it post?" rummages
+// through them. The day an agent is offboarded, their held posts become
+// permanent litter.
+//
+// Retire is narrow enough not to need an owner:
+//   * it can only DELETE. There is no path from here to postToConnected, so the
+//     worst it can do is discard something, never publish it to a real page.
+//   * it refuses anything younger than the floor. Nobody is waiting on a ✅ from
+//     three weeks ago, so age alone proves no live work is at stake — no claim
+//     of identity required, and none accepted.
+// A structurally empty record is retirable at any age: no caption and no media
+// is not a post anybody is waiting for. That is what the two `caption:"race"`
+// rows on production were — residue from a dedupe test that reached the live
+// store.
+const RETIRE_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+export function retireVerdict(item, now = Date.now(), minAgeMs = RETIRE_MIN_AGE_MS) {
+  // NO MEDIA MEANS IT CAN NEVER PUBLISH. Both writers require photos — ingest
+  // refuses without images, hold refuses without mediaItems — so a held record
+  // with none is not a post waiting for a decision, it is litter, whatever its
+  // caption says and whatever its date says. The two `caption:"race"` rows on
+  // production are exactly this: residue from a dedupe test that reached the
+  // live store, with a caption, no photos, and no readable date, so every
+  // age-based rule refused them and they were unreachable forever.
+  const media = Array.isArray(item?.mediaItems) ? item.mediaItems.length : 0
+  if (!media) return { ok: true, reason: 'no media — this record could never have published' }
+
+  const at = Date.parse(item?.at)
+  // UNDATED IS NOT OLD. A record whose age cannot be read might have been held a
+  // minute ago, and refusing is the direction that cannot destroy live work.
+  if (!Number.isFinite(at)) return { ok: false, reason: 'this post carries no readable date, so its age cannot be checked' }
+  const ageMs = now - at
+  if (ageMs < minAgeMs) {
+    const days = Math.floor(ageMs / (24 * 60 * 60 * 1000))
+    return { ok: false, reason: `this post is ${days} day(s) old — retire only clears posts older than ${Math.round(minAgeMs / 86400000)} days. Use skip if you mean to discard it.` }
+  }
+  return { ok: true, reason: `held ${Math.floor(ageMs / 86400000)} days with no decision` }
 }
 
 export default async function handler(req, res) {
@@ -134,6 +184,15 @@ export default async function handler(req, res) {
 
   const item = await getPending(id)
   if (!item) return send(res, 404, { ok: false, error: 'Not found — already handled or expired' })
+
+  // Runs BEFORE the ownership gate: an unreachable record is exactly the one
+  // that needs clearing, and retire cannot publish.
+  if (decision === 'retire') {
+    const v = retireVerdict(item)
+    if (!v.ok) return send(res, 409, { ok: false, id, blocked: 'tooRecent', error: v.reason })
+    await delPending(id)
+    return send(res, 200, { ok: true, decision: 'retire', retired: true, id, reason: v.reason })
+  }
 
   // WHOSE POST IS THIS? The shared INGEST_SECRET says the caller is one of our
   // own Macs; it does not say WHICH agent it is acting for. At one tenant that
@@ -162,22 +221,54 @@ export default async function handler(req, res) {
   const claimProfile = body.profile || body.profileId || url.searchParams.get('profile') || ''
   const claimSender = body.sender || url.searchParams.get('sender') || ''
   const owner = ownershipVerdict({ claimProfile, claimSender, item })
-  if (owner.verdict === 'mismatch') {
+  // NO FORCED CROSS-TENANT DISCARD. `!(decision === 'skip' && forced)` let any
+  // secret-holder — and install.sh writes the SAME secret onto every client Mac
+  // — discard another tenant's held post at any age. It cannot publish, but the
+  // client silently never gets their post and no error reaches them: this
+  // product's own class-B signature, reintroduced as a convenience.
+  //
+  // `retire` already covers the case this was reaching for, and covers it
+  // safely: delete-only, and only past an age floor that proves nobody is
+  // waiting. A stuck post has an exit; a stranger does not get a delete button.
+  // PUBLISHING NEEDS EVERY CLAIM TO AGREE; DISCARDING NEEDS ONE.
+  // A re-onboarded agent keeps their phone and gets a new profile id, so one
+  // field disagrees and one matches — they are not a stranger to their own post
+  // and must be able to clear it. Sending that post to the wrong accounts is
+  // unrecoverable, so approve still requires the strict verdict.
+  const strictEnough = decision === 'approve' ? owner.strict !== false : true
+  if (owner.verdict === 'mismatch' || !strictEnough) {
     // Deliberately does NOT echo the record's real owner. The most likely caller
     // here is a model that got confused about which id belongs to whom, and
     // handing it the right profileId would be handing it the missing half of a
     // cross-tenant publish.
+    //
+    // A MISMATCH IS NOT ALWAYS SOMEBODY ELSE'S POST, AND IT USED TO BE A DEAD
+    // END. Re-onboarding an agent gives them a new profileId, so every post they
+    // held yesterday mismatches: 403 on approve AND 403 on skip, while
+    // retireVerdict() returns `tooRecent` for six more days. Nobody — not the
+    // agent, not the operator — could clear it, and the message named no way
+    // out, so it read as "this is not yours" about a post that was.
+    //
+    // Two things change, both of them additive:
+    //   * `skip` accepts force:true. Skip cannot publish; the worst it can do is
+    //     discard, which is what the caller is asking for, and it is the same
+    //     escape hatch the degraded-caption gate already uses.
+    //   * the message names the exits instead of only stating the refusal.
+    const exits = decision === 'skip'
+      ? 'If it IS this agent\'s post and the profileId changed (a re-onboard does that), re-send with force:true to discard it.'
+      : 'If it IS this agent\'s post and the profileId changed (a re-onboard does that), send the CURRENT profile as `profile`. To get rid of it instead: skip it with force:true, or retire it once it is 7 days old.'
     return send(res, 403, {
       ok: false, id, blocked: 'notYours', field: owner.field,
-      error: `this held post belongs to a different agent — refusing to ${decision === 'skip' ? 'discard' : 'publish'} it. Check the pendingId: it came from another tenant's list, not this sender's.`,
+      error: `this held post is recorded against a different agent — refusing to ${decision === 'skip' ? 'discard' : 'publish'} it. ${exits}`,
     })
   }
 
   if (decision === 'skip') {
     await delPending(id)
-    return send(res, 200, { ok: true, decision: 'skip', skipped: true, id, ownership: owner.verdict })
+    return send(res, 200, { ok: true, decision: 'skip', skipped: true, id, ownership: owner.verdict,
+      ...(owner.verdict === 'mismatch' ? { forcedPastOwnership: true } : {}) })
   }
-  if (decision !== 'approve') return send(res, 400, { error: `Unclear decision "${decision}" — use approve or skip` })
+  if (decision !== 'approve') return send(res, 400, { error: `Unclear decision "${decision}" — use approve, skip or retire` })
 
   // The tenant's own profile, captured at ingest. NO fallback: publishing to a
   // default profile means publishing to somebody else's accounts.
@@ -189,9 +280,19 @@ export default async function handler(req, res) {
   // enforced rule — and AUTO mode has no assistant at all. A human who really
   // wants the boilerplate can pass force:true.
   if (item.captionDegraded && !forced) {
+    // WHY it is degraded is stored on the record (captionDegradedReason, written
+    // by ingest.js and /api/hold) and was never read by anything. So the ✅ said
+    // "the AI writer failed ... re-send the listing once the caption engine is
+    // back" even when the writer had succeeded and the caption had simply broken
+    // the listing contract — false, and unactionable, because re-sending the
+    // same listing reproduces the same refusal every time.
+    const why = String(item.captionDegradedReason || '').trim()
     return send(res, 409, {
       ok: false, id, blocked: 'captionDegraded',
-      error: 'this caption is generic demo text (the AI writer failed), not this agent\'s style. Refusing to publish. Re-send the listing once the caption engine is back, or pass force:true to publish it anyway.',
+      ...(why ? { captionDegradedReason: why } : {}),
+      error: why
+        ? `refusing to publish: ${why}. This is the agent's own caption, not demo text — the engine is fine, so re-sending the listing will not change it. Fix the caption, or pass force:true to publish it as it stands.`
+        : 'this caption is generic demo text (the AI writer failed), not this agent\'s style. Refusing to publish. Re-send the listing once the caption engine is back, or pass force:true to publish it anyway.',
     })
   }
 

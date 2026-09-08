@@ -29,30 +29,53 @@ function specsEn(l) {
   ].filter(Boolean).join('\n')
 }
 
+// A PLACE PHRASE, OR NOTHING. Every template used to read `l.location ||
+// 'Kuching'` (or `|| '古晋'`), and three of them stated the town in prose or
+// hardcoded it into hashtags whatever the listing said — the zh tiktok template
+// literally produced "古晋Miri这间公寓". This is the same substitution that was
+// removed from the reel script, the TikTok title and the price card, surviving
+// in the fallback captions; and these captions are NOT unreachable — the web-app
+// path (/api/social-post, /api/social-broadcast) gates on looksLikeDemoCaption
+// alone, which only recognises the English facebook_page shape.
+//
+// A caption that omits the area reads as a caption about a property. One that
+// names the wrong area is a false claim about a real address.
+const loc = (l) => (l.location ? String(l.location) : '')
+const inEn = (l) => (loc(l) ? ` in ${loc(l)}` : '')
+const atEn = (l) => (loc(l) ? ` @ ${loc(l)}` : '')
+const diMs = (l) => (loc(l) ? ` di ${loc(l)}` : '')
+// Geo hashtags derived from the listing's own location, exactly as ingest.js
+// geoTags() does. #kuchingproperty / #sarawak / #古晋房产 / #hartanahkuching /
+// #rumahkuching were hardcoded onto every caption. A hashtag is a claim.
+const slug = (l) => loc(l).replace(/[^\p{L}\p{N}]/gu, '').toLowerCase()
+const geoEn = (l) => (slug(l) ? `#${slug(l)}property ` : '')
+const geoZh = (l) => (loc(l) ? `#${loc(l)}房产 ` : '')
+const geoMs = (l) => (slug(l) ? `#hartanah${slug(l)} ` : '')
+
 const templates = {
   en: (l) => ({
-    facebook_page: `✨ ${l.propertyType || 'Property'} in ${l.location || 'Kuching'} — now available\n\nLooking for a place that just feels right? This ${l.propertyType?.toLowerCase() || 'home'}${l.bedrooms != null ? ` with ${l.bedrooms} bedrooms` : ''} in ${l.location || 'Kuching'} is ready for its next owner. ${money(l)}${l.listingType === 'sale' ? '.' : ' — great value for the area.'}\n\n${beds(l)}${l.sqft != null ? ` · ${l.sqft} sq ft` : ''}\n\nDrop me a DM and I'll send over the full details and viewing times. 🏡`,
-    marketplace: `${money(l)} | ${l.propertyType || 'Property'} @ ${l.location || 'Kuching'}\n${beds(l)}${l.sqft != null ? ` | ${l.sqft} sqft` : ''}${l.furnishing ? ` | ${l.furnishing}` : ''}\nMessage now to view. Kuching property for ${l.listingType === 'rental' ? 'rent' : 'sale'}.`,
-    mudah: `${l.propertyType || 'Property'} for ${l.listingType === 'rental' ? 'Rent' : 'Sale'} — ${l.location || 'Kuching'}\n${money(l)}\n\n${specsEn(l)}\n\nWell-located in ${l.location || 'Kuching'}. Contact for viewing.`,
-    portals: `${l.propertyType || 'Property'} For ${l.listingType === 'rental' ? 'Rent' : 'Sale'} in ${l.location || 'Kuching'}, Sarawak\n\nAsking: ${money(l)}\n\n${specsEn(l)}\n\nThis property is situated in ${l.location || 'Kuching'}, offering convenient access to local amenities. Please contact the marketing agent to arrange an inspection.`,
-    tiktok: `POV: you just found a ${l.propertyType?.toLowerCase() || 'home'} in ${l.location || 'Kuching'} for ${money(l)} 👀\n\n${beds(l)}\nComment "INFO" and I'll send details 📲\n\n#kuchingproperty #sarawak #propertymalaysia #rumahkuching #${(l.location || 'kuching').toLowerCase().replace(/\s+/g, '')}`,
-    instagram: `${l.propertyType || 'Property'} in ${l.location || 'Kuching'} 🏡\n${money(l)}\n\n${beds(l)}${l.sqft != null ? `\n${l.sqft} sq ft` : ''}\n\nDM to arrange a viewing.\n.\n.\n#kuchingproperty #kuchingrealestate #sarawakproperty #propertymalaysia #${l.listingType === 'rental' ? 'forrent' : 'forsale'} #rumahdijual`,
+    facebook_page: `✨ ${l.propertyType || 'Property'}${inEn(l)} — now available\n\nLooking for a place that just feels right? This ${l.propertyType?.toLowerCase() || 'home'}${l.bedrooms != null ? ` with ${l.bedrooms} bedrooms` : ''}${inEn(l)} is ready for its next owner. ${money(l)}${l.listingType === 'sale' ? '.' : ' — great value for the area.'}\n\n${beds(l)}${l.sqft != null ? ` · ${l.sqft} sq ft` : ''}\n\nDrop me a DM and I'll send over the full details and viewing times. 🏡`,
+    marketplace: `${money(l)} | ${l.propertyType || 'Property'}${atEn(l)}\n${beds(l)}${l.sqft != null ? ` | ${l.sqft} sqft` : ''}${l.furnishing ? ` | ${l.furnishing}` : ''}\nMessage now to view. ${loc(l) ? `${loc(l)} property` : 'Property'} for ${l.listingType === 'rental' ? 'rent' : 'sale'}.`,
+    mudah: `${l.propertyType || 'Property'} for ${l.listingType === 'rental' ? 'Rent' : 'Sale'}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `Well-located in ${loc(l)}. ` : ''}Contact for viewing.`,
+    portals: `${l.propertyType || 'Property'} For ${l.listingType === 'rental' ? 'Rent' : 'Sale'}${inEn(l)}\n\nAsking: ${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `This property is situated in ${loc(l)}, offering convenient access to local amenities. ` : ''}Please contact the marketing agent to arrange an inspection.`,
+    tiktok: `POV: you just found a ${l.propertyType?.toLowerCase() || 'home'}${inEn(l)} for ${money(l)} 👀\n\n${beds(l)}\nComment "INFO" and I'll send details 📲\n\n${geoEn(l)}#propertymalaysia`,
+    instagram: `${l.propertyType || 'Property'}${inEn(l)} 🏡\n${money(l)}\n\n${beds(l)}${l.sqft != null ? `\n${l.sqft} sq ft` : ''}\n\nDM to arrange a viewing.\n.\n.\n${geoEn(l)}#propertymalaysia #${l.listingType === 'rental' ? 'forrent' : 'forsale'}`,
   }),
   zh: (l) => ({
-    facebook_page: `✨ ${l.location || '古晋'}优质${l.propertyType ? cnType(l.propertyType) : '房产'}，诚意出${l.listingType === 'rental' ? '租' : '售'}\n\n位于${l.location || '古晋'}，${l.bedrooms != null ? `${l.bedrooms}间睡房` : '空间宽敞'}${l.bathrooms != null ? `、${l.bathrooms}间浴室` : ''}，${l.listingType === 'rental' ? '月租' : '售价'} ${money(l)}。地点方便，生活机能齐全。\n\n有兴趣欢迎私信我，我把详细资料和看房时间发给您。🏡`,
-    marketplace: `${money(l)}｜${l.location || '古晋'} ${l.propertyType ? cnType(l.propertyType) : '房产'}\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? `${l.bathrooms}厕` : ''}${l.sqft != null ? `｜${l.sqft}平方尺` : ''}\n古晋${l.listingType === 'rental' ? '出租' : '出售'}，私信预约看房。`,
-    mudah: `${l.location || '古晋'} ${l.propertyType ? cnType(l.propertyType) : '房产'}${l.listingType === 'rental' ? '出租' : '出售'}\n${money(l)}\n\n${cnSpecs(l)}\n\n地点优越，欢迎来电安排看房。`,
-    portals: `${l.location || '古晋'}${l.propertyType ? cnType(l.propertyType) : '房产'} — ${l.listingType === 'rental' ? '出租' : '出售'}\n\n${l.listingType === 'rental' ? '月租' : '售价'}：${money(l)}\n\n${cnSpecs(l)}\n\n本房产坐落于${l.location || '古晋'}，交通便利，邻近各项生活设施。有意者请联络经纪安排看房。`,
-    tiktok: `古晋${l.location || ''}这间${l.propertyType ? cnType(l.propertyType) : '房子'}只要 ${money(l)}👀\n\n${l.bedrooms != null ? `${l.bedrooms}房 ` : ''}地点超方便\n留言「资料」我私你详情📲\n\n#古晋房产 #砂拉越 #kuchingproperty #买房 #租房`,
-    instagram: `${l.location || '古晋'} ${l.propertyType ? cnType(l.propertyType) : '房产'} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? ` ${l.bathrooms}厕` : ''}${l.sqft != null ? `\n${l.sqft} 平方尺` : ''}\n\n私信预约看房。\n.\n.\n#古晋房产 #古晋买房 #砂拉越房产 #kuchingproperty #${l.listingType === 'rental' ? '出租' : '出售'}`,
+    facebook_page: `✨ ${loc(l)}优质${l.propertyType ? cnType(l.propertyType) : '房产'}，诚意出${l.listingType === 'rental' ? '租' : '售'}\n\n${loc(l) ? `位于${loc(l)}，` : ''}${l.bedrooms != null ? `${l.bedrooms}间睡房` : '空间宽敞'}${l.bathrooms != null ? `、${l.bathrooms}间浴室` : ''}，${l.listingType === 'rental' ? '月租' : '售价'} ${money(l)}。地点方便，生活机能齐全。\n\n有兴趣欢迎私信我，我把详细资料和看房时间发给您。🏡`,
+    marketplace: `${money(l)}｜${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? `${l.bathrooms}厕` : ''}${l.sqft != null ? `｜${l.sqft}平方尺` : ''}\n${loc(l)}${l.listingType === 'rental' ? '出租' : '出售'}，私信预约看房。`,
+    mudah: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}${l.listingType === 'rental' ? '出租' : '出售'}\n${money(l)}\n\n${cnSpecs(l)}\n\n地点优越，欢迎来电安排看房。`,
+    portals: `${loc(l)}${l.propertyType ? cnType(l.propertyType) : '房产'} — ${l.listingType === 'rental' ? '出租' : '出售'}\n\n${l.listingType === 'rental' ? '月租' : '售价'}：${money(l)}\n\n${cnSpecs(l)}\n\n${loc(l) ? `本房产坐落于${loc(l)}，交通便利，邻近各项生活设施。` : '交通便利，邻近各项生活设施。'}有意者请联络经纪安排看房。`,
+    tiktok: `${loc(l)}这间${l.propertyType ? cnType(l.propertyType) : '房子'}只要 ${money(l)}👀\n\n${l.bedrooms != null ? `${l.bedrooms}房 ` : ''}地点超方便\n留言「资料」我私你详情📲\n\n${geoZh(l)}#马来西亚房产 #${l.listingType === 'rental' ? '租房' : '买房'}`,
+    instagram: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? ` ${l.bathrooms}厕` : ''}${l.sqft != null ? `\n${l.sqft} 平方尺` : ''}\n\n私信预约看房。\n.\n.\n${geoZh(l)}#马来西亚房产 #${l.listingType === 'rental' ? '出租' : '出售'}`,
   }),
   ms: (l) => ({
-    facebook_page: `✨ ${l.propertyType || 'Hartanah'} di ${l.location || 'Kuching'} — untuk di${l.listingType === 'rental' ? 'sewa' : 'jual'}\n\nSedang cari rumah yang selesa untuk keluarga? ${l.propertyType || 'Rumah'} ini${l.bedrooms != null ? ` dengan ${l.bedrooms} bilik tidur` : ''} di ${l.location || 'Kuching'} sedia untuk tuan baharu. ${l.listingType === 'rental' ? 'Sewa' : 'Harga'}: ${money(l)}.\n\n${msSpecsLine(l)}\n\nPM saya untuk maklumat penuh dan masa untuk lihat rumah. 🏡`,
-    marketplace: `${money(l)} | ${l.propertyType || 'Hartanah'} @ ${l.location || 'Kuching'}\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? ` | ${l.sqft} kaki persegi` : ''}\nUntuk di${l.listingType === 'rental' ? 'sewa' : 'jual'} di Kuching. PM untuk tempahan lihat rumah.`,
-    mudah: `${l.propertyType || 'Hartanah'} untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'} — ${l.location || 'Kuching'}\n${money(l)}\n\n${msSpecs(l)}\n\nLokasi strategik di ${l.location || 'Kuching'}. Hubungi untuk tempahan melihat.`,
-    portals: `${l.propertyType || 'Hartanah'} Untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'} di ${l.location || 'Kuching'}, Sarawak\n\nHarga: ${money(l)}\n\n${msSpecs(l)}\n\nHartanah ini terletak di ${l.location || 'Kuching'} dengan akses mudah ke kemudahan setempat. Sila hubungi ejen pemasaran untuk mengatur tinjauan.`,
-    tiktok: `POV: kau jumpa ${l.propertyType?.toLowerCase() || 'rumah'} di ${l.location || 'Kuching'} harga ${money(l)} 👀\n\n${l.bedrooms != null ? `${l.bedrooms} bilik ` : ''}lokasi memang best\nComment "INFO" nanti PM details 📲\n\n#hartanahkuching #sarawak #rumahdijual #propertymalaysia #kuching`,
-    instagram: `${l.propertyType || 'Hartanah'} di ${l.location || 'Kuching'} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? `\n${l.sqft} kaki persegi` : ''}\n\nPM untuk tempahan lihat rumah.\n.\n.\n#hartanahkuching #rumahkuching #hartanahsarawak #propertymalaysia #${l.listingType === 'rental' ? 'disewa' : 'dijual'}`,
+    facebook_page: `✨ ${l.propertyType || 'Hartanah'}${diMs(l)} — untuk di${l.listingType === 'rental' ? 'sewa' : 'jual'}\n\nSedang cari rumah yang selesa untuk keluarga? ${l.propertyType || 'Rumah'} ini${l.bedrooms != null ? ` dengan ${l.bedrooms} bilik tidur` : ''}${diMs(l)} sedia untuk tuan baharu. ${l.listingType === 'rental' ? 'Sewa' : 'Harga'}: ${money(l)}.\n\n${msSpecsLine(l)}\n\nPM saya untuk maklumat penuh dan masa untuk lihat rumah. 🏡`,
+    marketplace: `${money(l)} | ${l.propertyType || 'Hartanah'}${loc(l) ? ` @ ${loc(l)}` : ''}\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? ` | ${l.sqft} kaki persegi` : ''}\nUntuk di${l.listingType === 'rental' ? 'sewa' : 'jual'}${diMs(l)}. PM untuk tempahan lihat rumah.`,
+    mudah: `${l.propertyType || 'Hartanah'} untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Lokasi strategik di ${loc(l)}. ` : ''}Hubungi untuk tempahan melihat.`,
+    portals: `${l.propertyType || 'Hartanah'} Untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'}${diMs(l)}\n\nHarga: ${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Hartanah ini terletak di ${loc(l)} dengan akses mudah ke kemudahan setempat. ` : ''}Sila hubungi ejen pemasaran untuk mengatur tinjauan.`,
+    tiktok: `POV: kau jumpa ${l.propertyType?.toLowerCase() || 'rumah'}${diMs(l)} harga ${money(l)} 👀\n\n${l.bedrooms != null ? `${l.bedrooms} bilik ` : ''}lokasi memang best\nComment "INFO" nanti PM details 📲\n\n${geoMs(l)}#propertymalaysia`,
+    instagram: `${l.propertyType || 'Hartanah'}${diMs(l)} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? `\n${l.sqft} kaki persegi` : ''}\n\nPM untuk tempahan lihat rumah.\n.\n.\n${geoMs(l)}#propertymalaysia #${l.listingType === 'rental' ? 'disewa' : 'dijual'}`,
   }),
 }
 
@@ -135,7 +158,22 @@ export function demoPlan(count = 6, languageIds = ['en', 'zh', 'ms']) {
 /** Demo parse: light heuristics so paste-to-parse works offline too. */
 export function demoParse(rawText) {
   const t = (rawText || '').toLowerCase()
-  const rental = /(rent|sewa|month|bulan|\/mo|monthly)/.test(t)
+  // NO CHINESE, and this is the fallback parser — the one used every time the
+  // free tier rate-limits the real one. 出租, 招租 and 月租 are how a Chinese
+  // listing says "for rent", and without them every one of them was typed as a
+  // SALE. The transaction guard then read the agent's own correct rental caption
+  // as a contradiction and refused it, telling them the caption engine had
+  // failed. `t` is lowercased ASCII-safe; CJK is unaffected by case.
+  // A SALE IS ALSO SOMETHING THE TEXT HAS TO SAY. `rental ? 'rental' : 'sale'`
+  // meant every listing that mentioned neither was typed a SALE — a guess, and
+  // one that travels: it picks the FOR SALE pill burned onto the price card, it
+  // picks whether the price reads "RM1,800" or "RM1,800/month", and it is what
+  // the transaction guard measures a caption against. A wrong type turns a
+  // correct caption into a contradiction; an absent one just makes the guard
+  // silent. So an unsignalled listing is now `null`, and every reader below
+  // already treats null as "not a rental" without asserting a sale.
+  const sale = /(for\s+sale|on\s+sale|selling|sale\s+price|dijual|untuk\s+dijual|harga\s+jual|出售|待售|售价|售價|出讓|出让)/.test(t)
+  const rental = /(rent|sewa|month|bulan|\/mo|monthly|出租|招租|月租|租金|房屋出租|disewa|\/月|每月|个月|個月|per\s*bulan)/.test(t)
   // Price: prefer money-flagged figures (RM prefix, or k/juta/mil suffix) over
   // bare small numbers like bed/bath counts.
   let price = null
@@ -152,8 +190,50 @@ export function demoParse(rawText) {
     priceCandidates.push(Math.round(n))
   }
   if (priceCandidates.length) {
-    // A rental price is the smallest sensible monthly figure; a sale, the largest.
-    price = rental ? Math.min(...priceCandidates) : Math.max(...priceCandidates)
+    // THE ASKING FIGURE, NOT THE SMALLEST ONE.
+    //
+    // This was `rental ? min : max`, keyed off the raw rent-word test. Two ways
+    // it picked the wrong number, both measured on ordinary listings:
+    //   - "For sale … RM450,000. Maintenance fee RM250/month" matched `month`,
+    //     so the listing was typed a RENTAL and priced at RM250.
+    //   - "Shoplot for rent RM3,500/month plus RM300 service charge" is a real
+    //     rental, and min picked the RM300 charge as the rent.
+    // A wrong price is not cosmetic here: the guard measures the agent's caption
+    // against it, so the caption states the true price and gets refused for
+    // "inventing" it.
+    //
+    // A monthly rent is the LARGEST figure that could plausibly be one. The
+    // ceiling separates a rent from an asking price mentioned in the same ad,
+    // and is deliberately far above any real Malaysian residential rent.
+    // The rent is the figure the listing ATTACHES A MONTH TO. A deposit is
+    // larger than the rent it is computed from ("RM1,200/month. Deposit
+    // RM2,400"), so neither the smallest nor the largest figure finds it —
+    // only the one wearing "/month".
+    const RENT_CEILING = 50000
+    const type = sale ? 'sale' : (rental ? 'rental' : null)
+    if (type === 'rental') {
+      const perMonth = []
+      // Two word orders. English and Malay put the marker AFTER the figure
+      // ("RM1,200/month", "RM800 sebulan"); Chinese puts it BEFORE
+      // ("月租 RM1,800"). Reading only the first form picked the deposit on
+      // every Chinese rental — 押金 RM3,600 instead of 月租 RM1,800.
+      const AFTER = /(?:rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?\s*(?:\/\s*|per\s*|a\s+|se)?(?:mo\b|month|monthly|bulan|月)/gi
+      const BEFORE = /(?:月租|租金|每月|月付)\s*[:：]?\s*(?:rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?/gi
+      for (const RE of [AFTER, BEFORE]) {
+        let m
+        while ((m = RE.exec(t)) !== null) {
+          let n = parseFloat(String(m[1]).replace(/,/g, ''))
+          if (Number.isNaN(n)) continue
+          if ((m[2] || '').toLowerCase()) n *= 1000
+          perMonth.push(Math.round(n))
+        }
+      }
+      const plausible = priceCandidates.filter((n) => n <= RENT_CEILING)
+      price = perMonth.length ? Math.max(...perMonth)
+        : (plausible.length ? Math.max(...plausible) : Math.min(...priceCandidates))
+    } else {
+      price = Math.max(...priceCandidates)
+    }
   }
 
   const bedM = t.match(/(\d+)\s*(?:bed|bilik|room|房|r\b)/)
@@ -164,7 +244,14 @@ export function demoParse(rawText) {
   const locM = (rawText || '').match(/(?:\bat\b|@|\bin\b)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})/)
 
   return {
-    listingType: rental ? 'rental' : 'sale',
+    // AN EXPLICIT SALE OUTRANKS A RENT-SHAPED WORD. `rental` matches "month",
+    // which appears in "Maintenance fee RM250/month" on a listing whose first
+    // words are "For sale". Testing rental first typed that listing a RENTAL —
+    // and `price` below then took the MINIMUM figure, so a RM450,000 condo was
+    // priced at RM250. The caption stated the real price, the guard measured it
+    // against RM250, and the post was refused. Measured: 4 of 6 realistic
+    // second-figure listings flipped from publish to refuse.
+    listingType: sale ? 'sale' : (rental ? 'rental' : null),
     price,
     location: locM ? locM[1].trim() : null,
     bedrooms: bedM ? Number(bedM[1]) : null,

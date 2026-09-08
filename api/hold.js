@@ -161,7 +161,15 @@ export default async function handler(req, res) {
       sender: body?.sender || null,
       location: body?.location ?? null,
       price: body?.price ?? null,
-      listingType: body?.listingType || 'sale',
+      // A LISTING THAT NEVER SAID IS NOT A SALE. This read `|| 'sale'`, so a
+      // Chinese rental whose transaction word the fallback parser could not read
+      // was STORED as a sale — and ingest.js:461 builds holdBody with
+      // `listingType: listing.listingType`, which is exactly null on that path.
+      // The stored value travels to approve.js -> appendFeed -> FeedPage's
+      // money(p.price, p.listingType), so the agent's own board showed a
+      // RM1,800/month rental as a flat "RM1,800". Same guess demoParse() was
+      // changed to stop making, re-made one hop downstream. Null means unknown.
+      listingType: body?.listingType || null,
       cover: body?.cover || mediaItems[0]?.url || null,
       mediaCount: mediaItems.length,
       group: body?.group || null,

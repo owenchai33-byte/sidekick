@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { inventsPriceHistory, captionViolations, ruleViolations} from './_lib/postguard.js'
+import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
@@ -98,7 +98,13 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     // is a correction. These are STYLE breaches and never block a publish on
     // their own - only the factual contract does that.
     let rv = ruleViolations(caption, rules, 'facebook_page')
-    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length || (v.marketing || []).length); attempt++) {
+    // The invented-reduction verdict used to be taken ONCE, after this loop, and
+    // was never handed to a repair prompt — so a caption it caught could not be
+    // fixed, only refused, and the agent was told the engine had failed. It is a
+    // caption violation like any other; it joins the loop and gets the same two
+    // rounds to be corrected.
+    let ph = inventsPriceHistory(caption, listing)
+    for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length || ph || (v.marketing || []).length); attempt++) {
       try {
         // The repair resends the prompt WITHOUT the style examples. Measured
         // 2026-09-04: the style guide plus its worked examples is ~966 tokens,
@@ -117,16 +123,18 @@ ${v.missing.length ? `- MISSING (the listing states these; include every one): $
 ${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}
 ${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}
 ${rv.length ? `- THEIR OWN RULES, broken (fix every one, they taught you these): ${rv.join('; ')}` : ''}
-${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it; describe only what they wrote): ${v.marketing.join('; ')}` : ''}`)
+${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it; describe only what they wrote): ${v.marketing.join('; ')}` : ''}
+${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listing never says so, and there is no earlier or higher asking price. Remove the reduction claim and any earlier figure; state the one price the listing gives.` : ''}`)
         const repaired = extractJson(fix)
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
           const rcap = rparts.join('\n\n• • •\n\n')
           const rvv = captionViolations(rcap, listing)
           const rrules = ruleViolations(rcap, rules, 'facebook_page')
-          const before = v.missing.length + v.invented.length + rv.length + (v.marketing || []).length
-          const after = rvv.missing.length + rvv.invented.length + rrules.length + (rvv.marketing || []).length
-          if (after < before) { caption = rcap; v = rvv; rv = rrules }
+          const rph = inventsPriceHistory(rcap, listing)
+          const before = v.missing.length + v.invented.length + rv.length + (v.marketing || []).length + (ph ? 1 : 0)
+          const after = rvv.missing.length + rvv.invented.length + rrules.length + (rvv.marketing || []).length + (rph ? 1 : 0)
+          if (after < before) { caption = rcap; v = rvv; rv = rrules; ph = rph }
         }
       } catch { break /* repair is best-effort; the verdict below still stands */ }
     }
@@ -153,18 +161,39 @@ ${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it;
       // containing the word "hook" or "property name" anywhere blocked - and
       // this filter is the one thing standing between a bad name and a
       // permanent refusal, so it does not get to match loosely.
-      const blocking = v.missing.filter((m) => /^(?:RM|the below-value hook|property name)\b/i.test(m))
-      if (v.invented.length || blocking.length || v.missing.length > 1) {
+      //
+      // THE MONEY HALF OF THIS FILTER NEVER FIRED. `\b` after `RM` requires a
+      // non-word character next, and every entry it was written to catch is
+      // "RM" followed by a digit — so /^RM\b/ matched "RM338,000" not at all,
+      // and the comment above described a rule that did not exist. What actually
+      // blocked was `missing.length > 1`: any two omissions of any kind, which
+      // is how two dropped deposit figures and a "DM me" caption with no sqft
+      // were refused, while a caption stating NO PRICE AT ALL published clean as
+      // long as it dropped nothing else. Both halves are corrected here: money
+      // blocks, and a pile of non-material omissions does not.
+      const blocking = v.missing.filter((m) => /^RM[\d\s]|^(?:the below-value hook|property name)\b/i.test(m))
+      // A BARE MONEY FIGURE IS NOT AN INVENTION — the same exemption approve.js
+      // already applies at the ✅. captionViolations() has no arithmetic, so a
+      // deposit computed from the stated rent, a 10% downpayment or a 7% bumi
+      // discount all read as invented. The model is still handed every one of
+      // them BY NAME in the two repair rounds above; what changes is that a
+      // figure it declines to delete because the figure is true no longer ends
+      // the agent's post with "the AI caption engine failed".
+      const refusable = nonMoneyInventions(v.invented)
+      if (refusable.length || blocking.length || ph) {
         return { caption, degraded: true, warnings: v.warnings,
-          reason: `caption breaks the listing contract - ${[...v.invented.map((x)=>`invented "${x}"`), ...v.missing.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
+          reason: `caption breaks the listing contract - ${[...(ph ? ['invented a price reduction the listing never mentions'] : []), ...refusable.map((x)=>`invented "${x}"`), ...blocking.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
       }
     }
     warnings = v.warnings
   }
   // A caption that invents a price cut is WORSE than a missing one: it is a
-  // misleading claim about a client's property, published under their name.
-  // Treat it exactly like a failed generation so the publish gate refuses it.
-  if (!degraded && inventsPriceHistory(caption, listing)) {
+  // misleading claim about a client's property, published under their name — so
+  // it still refuses. It is now decided INSIDE the repair loop above (see `ph`),
+  // where the model is told what it invented and gets two rounds to take it
+  // back, instead of being judged once here with no way to fix it. This line
+  // remains for the degraded path, where no contract check ran at all.
+  if (degraded && inventsPriceHistory(caption, listing)) {
     return { caption, degraded: true, warnings, reason: 'invented a price reduction the listing never mentioned' }
   }
   return { caption, degraded, warnings }
@@ -388,7 +417,12 @@ export default async function handler(req, res) {
 
   // 1) Parse the message  2) write the caption in THIS agent's trained style
   const fields = await parseText(text, status)
-  const listing = { ...fields, listingType: fields.listingType || 'sale', rawText: text }
+  const listing = { ...fields, // NO DEFAULT. A guessed transaction type is worse than none: the rule below
+    // returns silently when the type is unknown, but a WRONG type turns a correct
+    // caption into a contradiction. demoParse — the fallback used every time the
+    // free tier rate-limits — could not read 出租 at all, so every Chinese rental
+    // defaulted to 'sale' and its correct caption was refused.
+    listingType: fields.listingType || null, rawText: text }
 
   // TikTok reel mode: return a punchy script + short caption + a rendered card.
   // The Mac (sidekick.mjs reel) builds the actual video and holds it for approval.
@@ -514,9 +548,20 @@ export default async function handler(req, res) {
     // Without it a Gemini outage publishes demo boilerplate straight to a
     // client's page with nobody ever seeing it.
     if (captionDegraded) {
+      // TWO DIFFERENT CAUSES, ONE MESSAGE. `captionDegraded` is set either
+      // because the model call really failed (and this IS demo boilerplate), or
+      // because the caption broke the listing contract — in which case it is the
+      // agent's real styled copy and the engine worked perfectly. Telling them
+      // "the engine failed, retry once it is back" in the second case is false
+      // AND unactionable: it will fail identically forever, and it sends whoever
+      // reads it to debug the wrong system. writeCaption() already returns the
+      // true reason; it just was not being said out loud anywhere.
       return send(res, 503, {
         ok: false, posted: false, blocked: 'captionDegraded', listing, caption,
-        error: 'the AI caption engine failed — refusing to auto-publish generic demo text. Retry once the engine is back.',
+        captionDegradedReason,
+        error: captionDegradedReason
+          ? `refusing to auto-publish: ${captionDegradedReason}. The caption engine is fine — this caption does not match the listing, so retrying will produce the same refusal.`
+          : 'the AI caption engine failed — refusing to auto-publish generic demo text. Retry once the engine is back.',
       })
     }
     const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
@@ -561,7 +606,11 @@ export default async function handler(req, res) {
       mediaCount: mediaItems.length, photoCount: media.length,
       styleApplied, brandApplied, profileId: postProfile, captionDegraded,
       ...(captionWarnings.length ? { captionWarnings } : {}),
-      ...(captionDegraded ? { captionWarning: 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
+      ...(captionDegraded ? { captionDegradedReason } : {}),
+      // Same two causes as the AUTO branch above — say which one it was.
+      ...(captionDegraded ? { captionWarning: captionDegradedReason
+        ? `✅ will refuse this: ${captionDegradedReason}. This is the agent's real caption and the engine is fine, so re-sending will not change it — fix the caption or the listing text.`
+        : 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
       ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
       ...(cardError ? { cardError } : {}), meta,
     })
