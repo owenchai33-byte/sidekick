@@ -195,7 +195,15 @@ export async function connectedAccounts(profileId) {
   // `limit` matches the PostPeer branch. Without it an agent with more accounts
   // than Zernio's default page size silently lists a subset — and a platform
   // missing from this list is a platform postToConnected never posts to.
-  const zqs = new URLSearchParams({ limit: '100', profileId: pid })
+  //
+  // ZERNIO REQUIRES page AND limit TOGETHER. Sending limit alone is a 400:
+  //   {"error":"page and limit must be provided together",
+  //    "type":"invalid_request_error","code":"invalid_field_value"}
+  // Measured on the live API the moment POSTING_PROVIDER became zernio — every
+  // agent's account list failed at once, which reads exactly like a bad profile
+  // id or a dead key and is neither. PostPeer accepts `limit` on its own, so
+  // this is one of the asymmetries between the two providers, not a typo.
+  const zqs = new URLSearchParams({ page: '1', limit: '100', profileId: pid })
   const r = await fetch(`${ZERNIO}/accounts?${zqs}`, { headers: authHeaders() })
   const d = await r.json().catch(() => ({}))
   // Carry the BODY, not just the status. A bare `Zernio accounts 404` reaches
