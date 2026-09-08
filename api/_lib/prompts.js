@@ -2,7 +2,7 @@
 // and generating per-platform × per-language copy. Both instruct the model to
 // return raw JSON only. Files prefixed `_` are not treated as routes by Vercel.
 
-import { resolvePropertyName } from './postguard.js'
+import { resolvePropertyName, bannedWord } from './postguard.js'
 
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
 import { transactionTag } from '../../shared/txn.js'
@@ -58,18 +58,19 @@ ${rawText}
 
 /** CONTENT: listing + chosen platforms/languages → native copy per combination. */
 /**
- * True when the agent's own rules forbid this word. Same phrasings ruleViolations
- * reads, so the prompt and the check can never disagree about what is banned.
+ * True when the agent's own rules forbid this word. The SAME parse
+ * ruleViolations uses, imported rather than copied, so the prompt and the check
+ * can never disagree about what is banned.
+ *
+ * It used to be a copy of that pair of regexes. A copy is a promise that the two
+ * agree, and it holds exactly until one of them is fixed — so the promise is
+ * made structural instead.
  */
 function bannedByRules(word, rules) {
   const w = String(word || '').trim().toLowerCase()
   if (!w) return false
   for (const raw of Array.isArray(rules) ? rules : []) {
-    const r = String(raw || '').toLowerCase()
-    const m =
-      r.match(/(?:never|don'?t|do not|jangan)\s+call\b.*\ban?\s+([a-z][a-z '-]{2,24})\s*$/) ||
-      r.match(/(?:never|don'?t|do not|jangan)\s+(?:say|use|write|mention)\s+(?:the word\s+)?(?:an?\s+)?["']?([a-z][a-z '-]{2,24}?)["']?\s*$/)
-    if (m && m[1].trim() === w) return true
+    if (bannedWord(raw) === w) return true
   }
   return false
 }
@@ -335,6 +336,12 @@ false advert.
   // "You write marketing copy" invited authoring. The job is to take the agent's
   // own listing and present it better - an editor's job, not a writer's.
   return `You are an expert property EDITOR for property agents in Malaysia. Agents send you their own listing; you republish it in their house format, sharper and better organised. You never add facts they did not give you, and you never drop the selling points they did.
+
+DO NOT EXPAND AN ABBREVIATION THE AGENT DID NOT SPELL OUT. Malaysian listings are
+written in shorthand and the expansions are not guessable: "Comm" is COMMISSION,
+never commencement; "nego" is negotiable; "VP" is vacant possession; "MOT" is
+memorandum of transfer. Copy the agent's own shorthand exactly as they wrote it.
+Guessing what one stands for states a fact they never stated.
 
 ${rulesBlock}${styleFirst}LISTING FACTS:
 ${facts}${rawBlock}

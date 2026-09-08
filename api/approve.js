@@ -342,5 +342,12 @@ export default async function handler(req, res) {
   })
   await delPending(id)
   await releasePending(id)
-  return send(res, 200, { ok: true, decision: 'approve', posted: r.platforms, id, ownership: owner.verdict, ...(r.partialErrors ? { partialErrors: r.partialErrors } : {}) })
+  // `skipped` rides alongside partialErrors, which already carries the sentence
+  // AGENTS.md rule 8 makes the agent read out. A platform the client asked for
+  // and did not get is part of reporting `posted` honestly, not a separate story.
+  return send(res, 200, {
+    ok: true, decision: 'approve', posted: r.platforms, id, ownership: owner.verdict,
+    ...(r.skipped ? { skipped: r.skipped } : {}),
+    ...(r.partialErrors ? { partialErrors: r.partialErrors } : {}),
+  })
 }

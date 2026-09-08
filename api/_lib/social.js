@@ -344,6 +344,37 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
   }
   try {
     let accounts = await connectedAccounts(profileId)
+    // A PLATFORM THAT IS NOT CONNECTED MUST NOT JUST VANISH.
+    //
+    // The filter below discards the requested platforms nobody holds an account
+    // for, and until now they were never mentioned again: ask for Facebook and
+    // Instagram with only Facebook connected and the answer was
+    // `{ok:true, platforms:['facebook']}`. AGENTS.md rule 8 makes the agent
+    // report `posted` faithfully, so it says "Facebook ✅" — true, and the client
+    // is simply never told Instagram was skipped or why. Only the case where
+    // EVERY platform is missing produced a message.
+    //
+    // That is the state a staged reconnect leaves every agent in, which is the
+    // state all three are in today after the Zernio switch. Reported, not
+    // refused: the platforms that CAN publish still publish.
+    const skipped = (platforms && platforms.length)
+      ? platforms.filter((p) => !accounts.some((a) => a.platform === p))
+      : []
+    // Reported through `partialErrors` as well as its own field, because
+    // AGENTS.md rule 8 ALREADY tells the agent to name the platform and the
+    // reason for every entry in it. A skipped platform is exactly that: a
+    // platform the client asked for that did not go live. No new agent contract
+    // is needed for the omission to reach the human.
+    const withSkipped = (r) => (skipped.length
+      ? {
+        ...r,
+        skipped,
+        partialErrors: [
+          ...(r.partialErrors || []),
+          ...skipped.map((p) => `${p}: no ${p} account is connected on this profile — not posted`),
+        ],
+      }
+      : r)
     if (platforms && platforms.length) accounts = accounts.filter((a) => platforms.includes(a.platform))
     if (!accounts.length) {
       // Nothing was sent, so the claim must not stand. Confirmed 2026-09-03:
@@ -353,7 +384,20 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
       // the agent told the human it had already posted. The listing was
       // unpublishable for the full 10-minute window behind a false success.
       await releasePostOnce(fp)
-      return { ok: false, reason: platforms ? `No ${platforms.join('/')} account connected yet` : 'No connected accounts on this profile yet' }
+      // `blocked` is the flag the agent layer branches on, and this refusal was
+      // the one shape that carried none — so it arrived as prose alongside
+      // retryable:true, and AGENTS.md rule 7 told the agent to retry an id that
+      // fails identically until a HUMAN connects the account. Retrying is still
+      // safe (nothing published, claim released); it just cannot ever work, and
+      // now the answer says so instead of leaving the agent to guess.
+      return {
+        ok: false,
+        blocked: 'notConnected',
+        needsConnect: platforms ? [...platforms] : [],
+        reason: platforms
+          ? `No ${platforms.join('/')} account connected yet — this cannot succeed on a retry; the agent has to connect ${platforms.join(' / ')} on the Connect page first, then ✅ again`
+          : 'No connected accounts on this profile yet — the agent has to connect an account on the Connect page first, then ✅ again',
+      }
     }
 
     // Check the balance BEFORE publishing, so an empty account is refused in
@@ -433,7 +477,7 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
         .map((x) => `${x.platform}: ${x.platformPostUrl}`)
 
       // No per-platform detail came back — stay optimistic but say which state we saw.
-      if (!plats.length) return { ok: true, platforms: targets.map((p) => p.platform), postId: d.postId, status }
+      if (!plats.length) return withSkipped({ ok: true, platforms: targets.map((p) => p.platform), postId: d.postId, status })
       // The branch name is the trap: `!posted.length` is NOT "every platform
       // failed" (see nothingIsLive above), so the claim is released only when
       // every target platform said so itself. Confirmed 2026-09-03, the cost of
@@ -450,11 +494,11 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
       // public page, which is worse than the failed platform staying unposted.
       // The caller sees the failure in partialErrors and re-sends only that
       // platform (a different fingerprint, so it is not blocked).
-      return {
+      return withSkipped({
         ok: true, platforms: posted, postId: d.postId, status,
         ...(failed.length ? { partialErrors: failed } : {}),
         ...(urls.length ? { postUrls: urls } : {}),
-      }
+      })
     }
 
     // Zernio: one call per caption variant.
@@ -591,14 +635,38 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
       }
       return { ok: false, error: errors.join(' | ') || 'Zernio accepted nothing and said nothing' }
     }
-    return {
+    return withSkipped({
       ok: true, platforms: posted,
       ...(postIds.length ? { postId: postIds.join(',') } : {}),
       ...(errors.length ? { partialErrors: errors } : {}),
       ...(urls.length ? { postUrls: urls } : {}),
-    }
+    })
   } catch (e) {
     await releasePostOnce(fp)
-    return { ok: false, error: `${provider()} unreachable: ` + (e?.message || String(e)) }
+    // "UNREACHABLE" IS A CLAIM ABOUT THE NETWORK, AND MOST THROWS HERE ARE NOT.
+    //
+    // connectedAccounts throws on every non-2xx, and this catch owned the
+    // wording, so a mistyped Zernio id came back to the agent as
+    //   "zernio unreachable: Zernio accounts 404: {"error":"Profile not found or
+    //    access denied"}"
+    // — which reads as an outage and sends whoever debugs it at the provider's
+    // status page instead of at the agent record. Same sentence for a revoked
+    // key (401) and for a lapsed subscription (402), and 402 is the ONLY way a
+    // Zernio billing failure can surface at all, since postingCredits() is inert
+    // on this provider. Switch day makes 404 the single most likely of the set.
+    //
+    // Half of this was already fixed: social.js:209 appends the provider's own
+    // body precisely because a bare status "is not actionable and is a lie". The
+    // lying prefix survived, and zernio-publish.test.mjs only asserted the body
+    // was carried — so the regression test passed while the sentence a human
+    // reads stayed false.
+    //
+    // Read the SHAPE, not a phrase list: a message that already names an HTTP
+    // status is the provider answering, and an answer is not an outage. Anything
+    // else (fetch failed, DNS, timeouts, aborts) really is unreachable and keeps
+    // the old wording unchanged.
+    const msg = e?.message || String(e)
+    const answered = /\b[1-5]\d{2}\b/.test(msg)
+    return { ok: false, error: answered ? `${provider()} refused: ${msg}` : `${provider()} unreachable: ${msg}` }
   }
 }

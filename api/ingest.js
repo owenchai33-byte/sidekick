@@ -612,8 +612,15 @@ export default async function handler(req, res) {
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), profileId: postProfile, platforms: r.platforms, mediaCount: mediaItems.length })
     // The auto path publishes immediately, so its report is the ONLY chance anyone
-    // has to notice the caption did not come out in this agent's trained format.
-    return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), styleApplied, ...settingsReport, ...(styleWarn ? { styleWarning: styleWarn } : {}), meta })
+    // has to notice the caption did not come out in this agent's trained format —
+    // AND the only chance to notice a platform they asked for never went out.
+    //
+    // postToConnected has two callers and only approve.js carried `skipped`
+    // through. Asking for facebook+instagram here with only Facebook connected
+    // answered `{ok:true, posted:['facebook']}` and never mentioned Instagram.
+    // This is the path with NO HUMAN IN THE LOOP, so a silent omission here is
+    // the one nobody ever finds.
+    return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, ...(r.skipped?.length ? { skipped: r.skipped } : {}), ...(r.partialErrors?.length ? { partialErrors: r.partialErrors } : {}), listing, caption, card: card || null, ...(cardError ? { cardError } : {}), styleApplied, ...settingsReport, ...(styleWarn ? { styleWarning: styleWarn } : {}), meta })
   }
 
   // REVIEW mode (default) — hold the finished post for a human ✅.

@@ -212,6 +212,19 @@ const MATERIAL_CLAIMS = [
   [/\bnon[- ]?bumi\b|bukan\s*bumi/i, /bumi|non[- ]?bumi|bukan\s*bumi/i],
   [/(?<!non[- ])(?<!bukan\s)\bbumi\s*(?:lot|unit)\b|lot\s*bumi/i, /bumi/i],
   [/malay reserve|rizab melayu|tanah rizab/i, /reserve|rizab/i],
+  // AN ABBREVIATION EXPANDED INTO THE WRONG WORD IS AN INVENTED FACT.
+  // Measured live 2026-09-08: the listing said "Comm: 1 month + 8% SST" — which
+  // in every Malaysian property ad means COMMISSION — and the caption published
+  // "Commencement: 1 month + 8% SST", a different thing said with the same
+  // confidence. The guard saw nothing, because every number and every other word
+  // was faithful.
+  // ONLY the measured one. A companion rule for "vacant possession / completion"
+  // was added on a hunch at the same time and instantly refused ordinary sale
+  // copy — "The unit is currently for rent, with vacant possession on
+  // completion" is how Malaysian investor listings are written. A blocker
+  // without a worked false-positive case is the mistake this file keeps making;
+  // it came straight back out.
+  [/commencement/i, /commencement|commencing|commence/i],
 ]
 
 // A contact line is not a property name. "Call Jason 0128887766" and "Hubungi
@@ -1367,6 +1380,99 @@ const EMOJI_BY_NAME = {
   sparkle: '✨', sparkles: '✨',
 }
 
+// WHICH WORD DID THE AGENT BAN?
+//
+// This is the one rule-parse with a PUBLISHED consequence, which is why it is
+// read by structure and not by phrasing. Its answer does two things: it drives
+// the repair round, and — through bannedByRules in prompts.js — it decides
+// whether a forbidden word is handed to the model as a stated LISTING FACT.
+// Edward's rule is "never call a condo an apartment"; his listing said neither
+// word, the parser inferred propertyType "Apartment", and the facts block
+// asserted it. The model wrote the word he had forbidden and two repair rounds
+// could not argue it back out, because the prompt was stating as fact the thing
+// the rule was asking it to avoid.
+//
+// The old parse was two regexes anchored to end-of-string, so it read exactly
+// the four phrasings AGENTS.md teaches the model to write and nothing else.
+// Measured 2026-09-08, all four of these LEAKED "Property type: Apartment"
+// into the facts block while the rule saved, listed and displayed normally:
+//     "Don't call it an apartment, it's a condo"
+//     "Never use the word apartment — it is a condo"
+//     "Always say condo, never apartment"
+//     "Never describe a property as an apartment"
+// Only the taught phrasing was enforced. Nothing logged the other three.
+//
+// THE SHAPE. A ban is a NEGATION, then optionally a naming verb, then the word.
+// Read clause by clause, because which side of the comma the word sits on is
+// decided by where the negation is, not by position:
+//     "Don't call it an apartment, it's a condo"  -> ban the FIRST clause's word
+//     "Always say condo, never apartment"         -> ban the SECOND clause's
+// Only clauses carrying a negation are read at all, so the positive half of a
+// "say X, not Y" rule can never be mistaken for the ban.
+const BAN_NEG = /\b(?:never|not|no|don'?t|dont|do not|avoid|stop|refrain from|jangan|elak)\b/
+// Everything that may sit between the negation and the word: an optional naming
+// verb, then an optional run ending in an article. A BARE `the` counts — without
+// it "Never say the price is negotiable" left four words for the word matcher,
+// which takes at most three, and the whole rule silently stopped firing. That
+// phrasing worked before the parse was rewritten, so it is a regression, and a
+// style rule that quietly stops applying is exactly what an agent never notices.
+// The run is GREEDY on purpose
+// so the LAST article wins — "never call a condo an apartment" bans "apartment",
+// not "condo" — and both parts are optional so "never apartment" still parses.
+const BAN_VERB =
+  /(?:say|saying|use|using|write|writing|mention|mentioning|call|calling|describe|describing|refer\s+to|label|labelling|labeling|put|guna|gunakan|menggunakan|sebut|menyebut|panggil|tulis)/
+const BAN_LEAD = new RegExp(
+  /\b(?:never|not|no|don'?t|dont|do not|avoid|stop|refrain from|jangan|elak)\b/.source +
+  `\\s*(?:${BAN_VERB.source}\\s+)?(?:.*\\b(?:as|a|an|the\\s+word|the\\s+term|the|word|term|perkataan)\\s+)?`,
+)
+// The word itself: one to three plain words. It ends at a clause boundary or at
+// a function word that starts a new phrase ("...apartment in captions"), so a
+// trailing qualifier cannot be swallowed into the ban.
+const BAN_WORD =
+  /["'“”]?([a-z][a-z'-]*(?:\s+[a-z][a-z'-]*){0,2}?)["'“”]?\s*(?:$|[,;:.!?]|\s+\b(?:in|on|for|when|while|it|its|it'?s|unless|because|instead|use|say|write|always|and|or|but|to|of|at|with|please|anywhere|ever)\b)/
+// Naming verbs are scaffolding, never the banned word themselves.
+const BAN_NOT_A_WORD = new Set([
+  'say', 'saying', 'use', 'using', 'write', 'writing', 'mention', 'mentioning',
+  'call', 'calling', 'describe', 'describing', 'refer', 'label', 'put', 'include',
+  'add', 'make', 'be', 'have', 'do', 'word', 'term', 'the', 'a', 'an', 'as', 'it',
+  'this', 'that', 'them', 'anything', 'ever', 'any',
+  // A NAMED EMOJI IS NOT A WORD BAN. "never use the fire emoji" is handled by
+  // the emoji arm, which knows 🔥; treated as a word ban it would hunt the
+  // letters "fire emoji" in the caption and never find them, while the real
+  // rule went unenforced. This became reachable the moment a bare `the` counted
+  // as scaffolding — before that, 'the' itself rejected the capture — and the
+  // fire-emoji rule is the one that has already cost a client their whole
+  // caption format once.
+  'emoji', 'emojis',
+])
+
+/**
+ * The word an agent's rule forbids, or null when the rule bans no single word.
+ *
+ * Deliberately answers null for anything it cannot read mechanically: a wrong
+ * ban strips a true field out of the facts block and sends every caption into a
+ * repair round it cannot win, so "I could not tell" is the safe answer.
+ */
+export function bannedWord(rule) {
+  const r = String(rule || '').toLowerCase().trim()
+  if (!r) return null
+  let found = null
+  // Split on clause boundaries, keeping only the clauses that negate something.
+  for (const clause of r.split(/[,;—–]|\s+-\s+/)) {
+    const c = clause.trim()
+    if (!c || !BAN_NEG.test(c)) continue
+    const m = c.match(new RegExp(BAN_LEAD.source + BAN_WORD.source))
+    if (!m) continue
+    const w = m[1].trim().replace(/\s+/g, ' ')
+    if (!w || w.length < 3 || w.length > 24) continue
+    if (BAN_NOT_A_WORD.has(w)) continue
+    // A multi-word capture whose last word is scaffolding is a mis-parse.
+    if (w.split(' ').some((p) => BAN_NOT_A_WORD.has(p))) continue
+    found = w
+  }
+  return found
+}
+
 /**
  * Style-rule breaches in a caption, as plain sentences the repair prompt can
  * quote back. `rules` is the agent's own list; `platform` narrows the ones that
@@ -1452,16 +1558,10 @@ export function ruleViolations(caption, rules, platform = '') {
       out.push(`they asked for Malay captions — write it in Malay`)
     }
 
-    // a forbidden word. Two shapes an agent actually writes:
-    //   "never call a condo an apartment"  -> the banned word is the LAST one
-    //   "never say luxury"                 -> the banned word follows the verb
-    const banned =
-      // greedy .* so the LAST "a/an" wins: "never call a condo an apartment"
-      // must ban "apartment", not "condo an apartment".
-      r.match(/(?:never|don'?t|do not|jangan)\s+call\b.*\ban?\s+([a-z][a-z '-]{2,24})\s*$/) ||
-      r.match(/(?:never|don'?t|do not|jangan)\s+(?:say|use|write|mention)\s+(?:the word\s+)?(?:an?\s+)?["']?([a-z][a-z '-]{2,24}?)["']?\s*$/)
-    if (banned) {
-      const word = banned[1].trim()
+    // a forbidden word — see bannedWord() for the shapes and why they are read
+    // by structure rather than by a phrase list.
+    const word = bannedWord(r)
+    if (word) {
       if (word.length > 2 && new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(cap)) {
         out.push(`they asked you never to say "${word}" — take it out`)
       }
