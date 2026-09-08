@@ -422,22 +422,92 @@ export default async function handler(req, res) {
   // Optional platform filter (e.g. ['facebook','instagram']) — post only to these.
   const platforms = Array.isArray(body?.platforms) && body.platforms.length ? body.platforms : null
 
+  // THIS AGENT'S SAVED SETTINGS - FETCHED TOGETHER, AND BEFORE THE PARSE.
+  //
   // Branding is per-agent for the same reason the caption style is: 100 agents on
-  // one system must not share one look. Loaded BEFORE the reel branch so the reel's
-  // card is branded too. An explicit body.brand still wins (the app preview passes
-  // one); otherwise the agent's saved brand; env vars are the last resort.
-  const savedBrand = await getBrand(postProfile)
-  const brand = { ...savedBrand, ...(body?.brand || {}) }
-  const brandApplied = !!(savedBrand.color || savedBrand.name)
+  // one system must not share one look. An explicit body.brand still wins (the
+  // app preview passes one); otherwise the agent's saved brand; env vars last.
+  //
+  // All three are blob reads keyed on nothing but the profile id, so none of
+  // them depends on the message, on the parse, or on each other - yet they used
+  // to run one after another with the model call wedged in the middle:
+  //   getBrand -> parseText(model) -> getStyle -> getRules -> writeCaption(model)
+  // Started here, all three ride along under the parse and are already in hand
+  // when the caption is written. Same reads, same values, ~3 round trips of dead
+  // air removed from every listing.
+  //
+  // The .catch() marks each promise as handled. It does NOT swallow anything:
+  // every one of them is still awaited below, so a genuine failure still lands
+  // where it is read. Without it, the `A reel needs photos` return two branches
+  // down would leave style and rules unawaited and turn a degraded blob read
+  // into an unhandled rejection that takes out the whole function.
+  const brandP = getBrand(postProfile); brandP.catch(() => {})
+  const styleP = getStyle(postProfile); styleP.catch(() => {})
+  const rulesP = getRules(postProfile); rulesP.catch(() => {})
 
   // 1) Parse the message  2) write the caption in THIS agent's trained style
   const fields = await parseText(text, status)
+
+  const savedBrand = await brandP
+  const brand = { ...savedBrand, ...(body?.brand || {}) }
+  const brandApplied = !!(savedBrand.color || savedBrand.name)
   const listing = { ...fields, // NO DEFAULT. A guessed transaction type is worse than none: the rule below
     // returns silently when the type is unknown, but a WRONG type turns a correct
     // caption into a contradiction. demoParse — the fallback used every time the
     // free tier rate-limits — could not read 出租 at all, so every Chinese rental
     // defaulted to 'sale' and its correct caption was refused.
     listingType: fields.listingType || null, rawText: text }
+
+  // NOTHING TO SAY, SAID CONFIDENTLY.
+  //
+  // Measured 2026-09-08. Six photos reached the agent eight seconds before the
+  // listing text did - media is never debounced, so the run started without it -
+  // and this endpoint composed anyway. With text:'' it returned ok:true and a
+  // finished reel script: "Looking for a new place? This one. Trust me, it won't
+  // last long. DM me now before it's gone." Voiced over a stranger's photos,
+  // that is a complete, publishable TikTok about a property the system knows
+  // nothing whatsoever about. The feed path did the same, filling in
+  // "[Specify Location]" and tagging it #PCMY_Sale - a transaction type nobody
+  // anywhere had stated.
+  //
+  // Every other guard in this file checks a caption against the listing. None of
+  // them fire here, because with no listing there is nothing to contradict: an
+  // empty source makes every invention unfalsifiable. So the refusal has to
+  // happen before the model is asked, not after it answers.
+  //
+  // NARROW ON PURPOSE, AND IT COSTS SOMETHING TO GET WRONG. This file has
+  // shipped seven guards that refused real work, so this one refuses only when
+  // ALL THREE are true - any one of them alone means there is something real to
+  // write from:
+  //   - the parse recovered no fact (price, size, location, rooms, type), AND
+  //   - the text contains no digit anywhere, AND
+  //   - there is no substantial text either.
+  //
+  // The digit clause is the one that matters most. Every real property listing
+  // carries a number - a price, a size, a floor, a room count, a phone - so a
+  // message with none of them is not a listing that the parser missed. Without
+  // it this guard refused "For rent in Kuching, RM1,300 per month, 3 rooms" the
+  // moment the parse came back empty, which is exactly what a rate-limited free
+  // tier does several times a day. That is the eighth silent refusal, caught in
+  // its own test file rather than in someone's chat.
+  //
+  // The length clause covers the rest: when an agent writes real prose about a
+  // unit and the parser recovers nothing, their words are still there and the
+  // model has something true to paraphrase.
+  const parsedAnything = [fields.price, fields.bedrooms, fields.bathrooms, fields.sqft,
+    fields.location, fields.propertyName, fields.title, fields.propertyType, fields.furnishing]
+    .some((v) => v !== null && v !== undefined && v !== '')
+  // Emoji and punctuation are not a listing. Count letters and digits only, so
+  // "📸📸" and "-----" read as the empty messages they are.
+  const words = String(text || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const hasNumber = /\d/.test(String(text || ''))
+  if (!parsedAnything && !hasNumber && words.length < 60) {
+    return send(res, 200, {
+      ok: false,
+      reason: 'no listing to post — this message has photos but no property details. Ask the agent to send the listing text (price, size, location), then run this again with it.',
+      listing, meta,
+    })
+  }
 
   // TikTok reel mode: return a punchy script + short caption + a rendered card.
   // The Mac (sidekick.mjs reel) builds the actual video and holds it for approval.
@@ -451,7 +521,7 @@ export default async function handler(req, res) {
     // The reel gets the same trained voice and learned rules as the caption -
     // without them an agent's correction fixed only half their output.
     const cardP = withBrandCard(media.slice(0, 1), listing, brand, true)
-    const [reelStyle, reelRulesRes] = await Promise.all([getStyle(postProfile), getRules(postProfile)])
+    const [reelStyle, reelRulesRes] = await Promise.all([styleP, rulesP])
     const reelRules = reelRulesRes.rules
     let rs = await reelScript(listing, status, reelStyle, reelRules)
     // The spoken script and the TikTok caption publish under the agent's name
@@ -516,11 +586,11 @@ export default async function handler(req, res) {
     })
   }
 
-  const styleGuide = await getStyle(postProfile)
+  const styleGuide = await styleP
 
   // Per-agent rules travel with the style: same profile, same isolation.
 
-  const rulesRes = await getRules(postProfile)
+  const rulesRes = await rulesP
   const agentRules = rulesRes.rules
   // Report whether a trained style was actually found. A missing style does not
   // error — it silently produces generic copy, which is exactly how an orphaned
@@ -559,6 +629,29 @@ export default async function handler(req, res) {
   const contact = null
   // `captionWarnings` are advisory and NEVER block: today they carry the
   // heuristic property-name guess, which used to refuse the post outright.
+  // THE CARD DOES NOT WAIT FOR THE CAPTION.
+  //
+  // renderBrandCard draws the price panel onto the cover photo from `listing`
+  // and `brand`. It has never read the caption - it cannot, the caption is not
+  // one of its arguments - yet it ran strictly after writeCaption, which is two
+  // model calls plus up to two repair rounds. Measured 2026-09-08 against the
+  // live function: the card render and its blob write are ~3.2s of the ~8s an
+  // agent spends staring at a silent chat, and every one of those seconds was
+  // spent waiting for something the card does not use.
+  //
+  // The reel branch has overlapped these two since 2026-09-04 (see cardP above);
+  // this is the same move on the path that actually carries every listing.
+  //
+  // Started only when it will be used. `dry` returns before any card is made and
+  // a listing with no photo returns too, so starting it on those paths would
+  // burn a blob write on a result nobody reads. withBrandCard cannot reject -
+  // every failure comes back as { items, cardError } - so there is no unhandled
+  // rejection to guard even on the paths that return without awaiting it.
+  const wantsCard = brand?.cardEnabled !== false && body?.card !== false
+  const socialCardP = (body?.dry !== true && media.length)
+    ? withBrandCard(media, listing, brand, wantsCard)
+    : null
+
   const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [] } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
 
   // Wiring test — parse + caption only. No card, no store, no post.
@@ -574,7 +667,7 @@ export default async function handler(req, res) {
   }
 
   // Render the branded cover + final media once (the approver sees the real thing).
-  const { items: mediaItems, card, cardError, cardFrom } = await withBrandCard(media, listing, brand, brand?.cardEnabled !== false && body?.card !== false)
+  const { items: mediaItems, card, cardError, cardFrom } = await socialCardP
   const captionShort = shortCaption(listing) // ≤90 chars for TikTok photo posts
   const feedBase = {
     location: listing.location || null,
