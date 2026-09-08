@@ -298,7 +298,10 @@ export default async function handler(req, res) {
 
   const status = providerStatus()
   const key = process.env.ZERNIO_API_KEY
-  const profileId = defaultProfile()
+  // DIAGNOSTICS ONLY, and scoped to the GET branch so it cannot reach a publish.
+  // It used to be declared here and used as the fallback for `body.profileId`
+  // further down — see the refusal at the POST branch for what that cost.
+  const profileId = req.method === 'GET' ? defaultProfile() : ''
 
   // Readiness check — verify wiring without posting.
   if (req.method === 'GET') {
@@ -397,10 +400,22 @@ export default async function handler(req, res) {
     : (process.env.INGEST_LANGS ? process.env.INGEST_LANGS.split(',').map((s) => s.trim()).filter(Boolean) : ['en'])
 
   const meta = { sender: body?.sender || null, group: body?.group || null }
-  // Per-tenant: post to the sender's OWN profile (the agent maps sender → profileId
-  // from tools/tenants.json). There is no safe fallback — the wrong profile means
-  // the wrong accounts AND the wrong caption style, and both fail quietly.
-  const postProfile = body?.profileId || profileId
+  // Per-tenant: post as the sender's OWN agent (the agent maps sender → agentId
+  // in tools/tenants.json). There is no safe fallback — the wrong agent means the
+  // wrong accounts AND the wrong caption style, and both fail quietly.
+  //
+  // THE FALLBACK IS GONE, and this is the line it was on. It read
+  // `body?.profileId || defaultProfile()`. With POSTING_PROVIDER=zernio and
+  // ZERNIO_PROFILE_ID set to anything, every unmapped sender resolved to that one
+  // profile and published to whoever owns it — the wrong Facebook, the wrong
+  // Instagram, the wrong TikTok, in the wrong caption style, with the wrong brand
+  // and the wrong rules, and reported to the sending agent as a success. The
+  // sender arriving unmapped needs no attacker and no mistake by Owen:
+  // sidekick.mjs looks tenants.json up by EXACT phone string, so a number that
+  // reaches us as "60169219859" instead of "+60169219859" simply misses.
+  //
+  // An unmapped sender is now refused, in words that name the file to fix.
+  const postProfile = body?.profileId || ''
   if (!postProfile) {
     return send(res, 400, { ok: false, error: 'no profile for this sender — add their phone → profileId in tools/tenants.json' })
   }
@@ -505,11 +520,40 @@ export default async function handler(req, res) {
 
   // Per-agent rules travel with the style: same profile, same isolation.
 
-  const agentRules = (await getRules(postProfile)).rules
+  const rulesRes = await getRules(postProfile)
+  const agentRules = rulesRes.rules
   // Report whether a trained style was actually found. A missing style does not
   // error — it silently produces generic copy, which is exactly how an orphaned
   // style went unnoticed after a provider switch. Surface it so the agent can say so.
   const styleApplied = !!(styleGuide.style || (styleGuide.examples || []).length)
+  // WHERE the style came from, not just whether there was one. 'primary' is the
+  // agent's own key; 'legacy:<oldId>' means the read-through fallback fired and
+  // this agent is still being served from a key they used to be known by — true
+  // and worth knowing, because it is the difference between "the migration is
+  // working" and "the migration has not happened yet". 'degraded' means the blob
+  // store failed and empty is NOT proof the agent is untrained.
+  const styleSource = styleGuide.source || 'none'
+  const rulesSource = rulesRes.source || 'none'
+  // A degraded read must never be reported as "no style" — that is the sentence
+  // that would send someone off to retrain a style that was never lost.
+  const settingsDegraded = !!(styleGuide.degraded || rulesRes.degraded || savedBrand.degraded)
+  // Spliced into every response shape below, so "did the fallback fire?" and
+  // "was this empty or merely unreadable?" are answered by the response instead
+  // of by someone guessing after the fact.
+  const settingsReport = {
+    styleSource, rulesSource,
+    ...(settingsDegraded ? { settingsDegraded: true } : {}),
+    ...(styleSource.startsWith('legacy:') || rulesSource.startsWith('legacy:')
+      ? { settingsNote: `served from a previous profile id (style: ${styleSource}, rules: ${rulesSource}) — the settings are intact but not yet re-keyed` }
+      : {}),
+  }
+  // The warning an agent actually reads. A DEGRADED read is not "no style": it is
+  // "we could not tell", and saying "no trained style" there is how somebody ends
+  // up retraining a style that was never lost.
+  const styleWarn = settingsDegraded
+    ? 'could not read this agent\'s saved settings (the store did not answer) — this caption may not be in their trained format. Do NOT retrain: nothing has been lost, the read failed.'
+    : styleApplied ? null
+      : 'no trained caption style found for this agent — using the default format'
   // WhatsApp click-to-chat link is HELD FOR FUTURE (Owen asked to remove it for now).
   // Re-enable by passing { whatsapp: meta.sender }; buildContentPrompt still supports it.
   const contact = null
@@ -521,7 +565,7 @@ export default async function handler(req, res) {
   if (body?.dry === true) {
     // Report the same flags as a real post — the dry path is what the health check
     // and any wiring test uses, so it must not look healthier than the real thing.
-    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile })
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile, ...settingsReport, ...(styleWarn ? { styleWarning: styleWarn } : {}) })
   }
 
   // A property post needs a photo.
@@ -567,7 +611,9 @@ export default async function handler(req, res) {
     const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
     if (!r.ok) return send(res, r.error ? 502 : 200, { ok: false, posted: false, reason: r.reason, error: r.error, listing, caption })
     await appendFeed({ ...feedBase, at: new Date().toISOString(), profileId: postProfile, platforms: r.platforms, mediaCount: mediaItems.length })
-    return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), meta })
+    // The auto path publishes immediately, so its report is the ONLY chance anyone
+    // has to notice the caption did not come out in this agent's trained format.
+    return send(res, 200, { ok: true, mode: 'auto', posted: r.platforms, listing, caption, card: card || null, ...(cardError ? { cardError } : {}), styleApplied, ...settingsReport, ...(styleWarn ? { styleWarning: styleWarn } : {}), meta })
   }
 
   // REVIEW mode (default) — hold the finished post for a human ✅.
@@ -605,13 +651,14 @@ export default async function handler(req, res) {
       caption, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
       styleApplied, brandApplied, profileId: postProfile, captionDegraded,
+      ...settingsReport,
       ...(captionWarnings.length ? { captionWarnings } : {}),
       ...(captionDegraded ? { captionDegradedReason } : {}),
       // Same two causes as the AUTO branch above — say which one it was.
       ...(captionDegraded ? { captionWarning: captionDegradedReason
         ? `✅ will refuse this: ${captionDegradedReason}. This is the agent's real caption and the engine is fine, so re-sending will not change it — fix the caption or the listing text.`
         : 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
-      ...(styleApplied ? {} : { styleWarning: 'no trained caption style found for this agent — using the default format' }),
+      ...(styleWarn ? { styleWarning: styleWarn } : {}),
       ...(cardError ? { cardError } : {}), meta,
     })
   } catch (e) {

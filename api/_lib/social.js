@@ -27,6 +27,7 @@
 //   * disconnect       DELETE /accounts/{id}            DELETE /connect/integrations/{id}
 
 import { postFingerprint, claimPostOnce, releasePostOnce, looksLikeDemoCaption } from './postguard.js'
+import { resolvePostingProfile } from './identity.js'
 
 const ZERNIO = 'https://zernio.com/api/v1'
 const POSTPEER = 'https://api.postpeer.dev/v1'
@@ -57,16 +58,54 @@ function authHeaders() {
     : { authorization: `Bearer ${key}` }
 }
 /**
- * The profile to use when the caller didn't name one — '' when there isn't one.
+ * DIAGNOSTIC ONLY. Never a publish fallback, and no longer reachable from one.
  *
- * '' is the honest answer, not a bug to be patched with a constant. Callers must
- * treat it as "I do not know whose accounts these would be" and refuse.
+ * This reports what <PROVIDER>_PROFILE_ID is set to so the readiness check can
+ * describe the install. NOTHING that lists accounts, starts an OAuth or
+ * publishes may consult it, and nothing does any more: connectedAccounts,
+ * connectUrl and postToConnected all take the agent they were given and refuse
+ * when there isn't one.
+ *
+ * WHY THAT MATTERS MORE AFTER THE ZERNIO SWITCH. The old hardcoded
+ * DEFAULT_PROFILE constant is gone (removed in 5d9edd8), but the hazard just
+ * moved into the env var, where it is easier to arm and harder to grep. With
+ * POSTING_PROVIDER=zernio and ZERNIO_PROFILE_ID set to anything, every unmapped
+ * sender used to resolve to that ONE profile and publish to whoever owns it —
+ * their Facebook, their Instagram, their TikTok — with the wrong caption style,
+ * the wrong brand and the wrong rules, reported back to the sending agent as a
+ * success. And three separate things push a person to fill that box in on
+ * switch day: .env.example calls it "REQUIRED", vite.config.js forwards it so
+ * local dev genuinely wants it, and the home screen's red "No accounts" badge
+ * looks like it is asking for one.
+ *
+ * So the variable is now inert on every path that can reach a client's account.
+ * Leaving it set is no longer dangerous; it is merely ignored.
  */
 export function defaultProfile() {
   return provider() === 'postpeer'
     ? process.env.POSTPEER_PROFILE_ID || ''
     : process.env.ZERNIO_PROFILE_ID || ''
 }
+
+/**
+ * agentId → the provider profile to act on, for THIS provider.
+ *
+ * Every public function below funnels through this, so the agent-id-to-posting-
+ * profile translation happens in exactly one place and a new call site cannot
+ * forget it. An agent with no record resolves to itself, which is precisely what
+ * every caller passed straight to the provider before the registry existed.
+ *
+ * Returns '' only when the caller named nobody — and '' means refuse.
+ */
+async function postingProfileFor(agentId) {
+  const id = typeof agentId === 'string' ? agentId.trim() : agentId ? String(agentId).trim() : ''
+  if (!id) return ''
+  return await resolvePostingProfile(id, provider())
+}
+
+// The one sentence every refusal below shares, so an unmapped sender always
+// reads the same and always names the file that fixes it.
+const NO_PROFILE = 'no profile for this sender — add their phone → profileId in tools/tenants.json'
 /** For /api/feed's status panel — is the current provider usable? */
 export function providerConfigured() {
   return { provider: provider(), configured: !!apiKey() }
@@ -94,6 +133,18 @@ const OUT_OF_CREDITS =
  * Null never means zero — it means the check itself could not answer.
  */
 export async function postingCredits() {
+  // POSTPEER-ONLY, and now says so. The URL below is hardcoded to PostPeer with
+  // no provider branch, so under Zernio this would send a Bearer token to
+  // PostPeer's usage endpoint. It is called under a provider() === 'postpeer'
+  // guard today, but the guard is at the call site and the hazard is here.
+  //
+  // Returning null (UNKNOWN, never zero) is the correct Zernio answer regardless:
+  // Zernio bills per connected account rather than per platform-post, so there is
+  // no per-post balance to check. The consequence is that the `noCredits` refusal
+  // and the OUT_OF_CREDITS message do not fire on Zernio — a lapsed Zernio
+  // account surfaces as a provider status code mid-publish instead. That is a
+  // real gap, and it is a different fix from this one.
+  if (provider() !== 'postpeer') return null
   try {
     const r = await fetch(`${POSTPEER}/usage/`, { headers: authHeaders() })
     if (!r.ok) return null
@@ -110,7 +161,10 @@ export async function postingCredits() {
 /** Accounts connected to a profile, normalised to { id, platform, username }. */
 export async function connectedAccounts(profileId) {
   if (!apiKey()) throw new Error(missingKey())
-  const pid = profileId || defaultProfile()
+  // `profileId` is an AGENT id; the provider's own id is looked up per provider.
+  // It used to be `profileId || defaultProfile()` — see defaultProfile's note for
+  // why that env var must never reach a call that names somebody's accounts.
+  const pid = await postingProfileFor(profileId)
   // NEVER fall through to "every account in the project". PostPeer lists all
   // integrations when no profileId is sent, so an unresolved profile used to
   // silently return ANOTHER TENANT'S accounts — which meant postToConnected
@@ -122,7 +176,7 @@ export async function connectedAccounts(profileId) {
   // empty pid would have gone to `/accounts?profileId=` — which is the same
   // "every account in the project" answer, one provider along.
   if (!pid) {
-    throw new Error('no profile for this sender — add their phone → profileId in tools/tenants.json')
+    throw new Error(NO_PROFILE)
   }
   if (provider() === 'postpeer') {
     const qs = new URLSearchParams({ limit: '100', profileId: pid })
@@ -138,16 +192,44 @@ export async function connectedAccounts(profileId) {
       broken: a.authStatus && a.authStatus !== 'active' ? a.authStatus : null,
     }))
   }
-  const r = await fetch(`${ZERNIO}/accounts?profileId=${encodeURIComponent(pid)}`, { headers: authHeaders() })
+  // `limit` matches the PostPeer branch. Without it an agent with more accounts
+  // than Zernio's default page size silently lists a subset — and a platform
+  // missing from this list is a platform postToConnected never posts to.
+  const zqs = new URLSearchParams({ limit: '100', profileId: pid })
+  const r = await fetch(`${ZERNIO}/accounts?${zqs}`, { headers: authHeaders() })
   const d = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(`Zernio accounts ${r.status}`)
-  return (d.accounts || []).map((a) => ({ id: a._id, platform: a.platform, username: a.username, broken: null }))
+  // Carry the BODY, not just the status. A bare `Zernio accounts 404` reaches
+  // the agent through postToConnected's catch as "zernio unreachable: Zernio
+  // accounts 404" — which is not actionable and is a lie, since a 404 for an
+  // unknown profile is the single most likely error on switch day and is not an
+  // outage.
+  if (!r.ok) throw new Error(`Zernio accounts ${r.status}: ${JSON.stringify(d).slice(0, 200)}`)
+  return (d.accounts || []).map((a) => ({
+    id: a._id, platform: a.platform, username: a.username, broken: zernioBroken(a),
+  }))
+}
+
+// Zernio's field for a stale OAuth token is not documented here and there is no
+// Zernio key on this machine to discover it with, so this reads the two names
+// PostPeer uses and treats ONLY words that certainly mean dead as broken.
+// Anything unrecognised — including a status word Zernio uses for a healthy
+// account — stays null, which is exactly today's behaviour. Inventing a
+// "reconnect" prompt for a working account would be its own silent refusal:
+// the agent stops trusting the screen and stops posting.
+const BROKEN_STATUS = /^(expired|revoked|invalid|error|disconnected|needs_reauth|reauth_required)$/i
+function zernioBroken(a) {
+  const s = String(a?.authStatus ?? a?.status ?? '').trim()
+  return s && BROKEN_STATUS.test(s) ? s : null
 }
 
 /** Hosted OAuth URL for an agent to link their OWN account to `profileId`. */
 export async function connectUrl({ platform, profileId, redirectUrl }) {
   if (!apiKey()) throw new Error(missingKey())
-  const pid = profileId || defaultProfile()
+  // Same translation as connectedAccounts: the link carries the AGENT id, and
+  // the OAuth has to be started against the CURRENT provider's profile — or the
+  // agent connects their Facebook to a profile the live provider knows nothing
+  // about, and their posts go nowhere with no error anyone sees.
+  const pid = await postingProfileFor(profileId)
   // An OAuth started with no profile attaches the agent's own Facebook Page to
   // whatever the provider considers "no profile" — shared with every other
   // tenant. ~/.openclaw/tools/connection-watch.mjs documents this as the reason
@@ -245,6 +327,9 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
   if (!allowDemo && looksLikeDemoCaption(caption)) {
     return { ok: false, blocked: 'captionDegraded', reason: 'this is the demo fallback caption, not a real one - refusing to publish it' }
   }
+  // Fingerprinted on the AGENT id, not the provider profile. That is deliberate:
+  // the dedupe window has to survive a provider change, or the flip itself would
+  // reset every claim and a retry from before it could double-post.
   const fp = postFingerprint({ profileId, caption, platforms, mediaItems })
   if (!(await claimPostOnce(fp))) {
     return { ok: false, duplicate: true, reason: 'an identical post just went out - ignoring this repeat' }
@@ -365,31 +450,145 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
     }
 
     // Zernio: one call per caption variant.
+    //
+    // THIS BRANCH USED TO ANNOUNCE POSTS IT HAD NOT VERIFIED. It pushed every
+    // platform in the group on a bare HTTP 2xx and never opened the body — the
+    // exact mistake the PostPeer branch above names in its own comment ("Reporting
+    // 'posted to all' just because the HTTP call worked is how a listing that
+    // failed on Instagram gets announced as published everywhere. Read the body.")
+    // Under Zernio that would be silent loss #7: the agent is told a listing went
+    // to Facebook AND Instagram when Instagram failed inside an accepted call, or
+    // when the post was merely queued.
+    //
+    // It now reads the body, and it releases the dedupe claim on an outright
+    // refusal so a fixed retry is not swallowed as a duplicate.
+    //
+    // WHAT IS DELIBERATELY UNCHANGED: when Zernio returns no per-platform detail,
+    // this still reports every target as posted. Zernio's response shape is not
+    // verified here (there is no Zernio key on this machine to verify it with),
+    // so the parsing is strictly additive — more information when the body has
+    // it, today's exact behaviour when it does not. A guess about the shape must
+    // never turn a successful post into a reported failure.
     const groups = [
       { accts: accounts.filter((a) => a.platform === 'tiktok'), content: short },
       { accts: accounts.filter((a) => a.platform !== 'tiktok'), content: caption },
     ].filter((g) => g.accts.length)
 
+    // ONE WALL-CLOCK BUDGET FOR THE WHOLE PUBLISH, not six sleeps per group.
+    //
+    // Zernio needs two groups (tiktok, non-tiktok) and the poll below slept
+    // 6 × 2000ms inside EACH, so a three-platform post measured 24,030ms against
+    // a Vercel function with no maxDuration — ~10s. providers.js:36 states that
+    // budget in this file's own words.
+    //
+    // What that costs is not a slow post, it is a DOUBLE post. Zernio accepts
+    // both groups and the listing goes live; the function is then killed at ~10s
+    // before appendFeed, delPending or releasePending run. The agent sees a
+    // gateway error and retries. Inside 10 minutes claimPostOnce answers
+    // `duplicate`; after 10 minutes (POST_DEDUPE_WINDOW_MS) the claim has expired
+    // and the same listing publishes a second time on a client's public page.
+    //
+    // The poll is a nicety — it buys per-platform detail. Publishing already
+    // happened when the request was accepted, so running out of budget means
+    // reporting what we know, not losing the post.
+    const POLL_BUDGET_MS = 5000
+    const publishStart = Date.now()
+
     const posted = []
     const errors = []
+    const urls = []
+    const allTargets = []
+    const allPlats = []
+    const postIds = []
+    // Nothing was ACCEPTED anywhere, and every refusal was an outright one — the
+    // two things that together prove no post is live and a retry cannot duplicate.
+    let anyAccepted = false
+    let everyRefusalOutright = true
+
     for (const g of groups) {
       const targets = g.accts.map((a) => ({ platform: a.platform, accountId: a.id }))
+      allTargets.push(...targets)
+      const names = targets.map((p) => p.platform).join('/')
       const pr = await fetch(`${ZERNIO}/posts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ content: g.content, mediaItems, platforms: targets, publishNow: true }),
       })
       const ptext = await pr.text().catch(() => '')
-      if (pr.ok) posted.push(...targets.map((p) => p.platform))
-      else errors.push(`${targets.map((p) => p.platform).join('/')}: ${pr.status} ${ptext.slice(0, 120)}`)
+      if (!pr.ok) {
+        // 4xx that means "never accepted" releases the claim; an ambiguous 5xx,
+        // 408 or 429 keeps it. Same REJECTED_OUTRIGHT set as PostPeer.
+        if (!REJECTED_OUTRIGHT.has(pr.status)) everyRefusalOutright = false
+        errors.push(`${names}: ${pr.status} ${ptext.slice(0, 120)}`)
+        continue
+      }
+      anyAccepted = true
+
+      let d = {}
+      try { d = JSON.parse(ptext) } catch { /* no body detail — stay optimistic below */ }
+      let status = d.status
+      let plats = Array.isArray(d.platforms) ? d.platforms : []
+      const pid2 = d.postId || d.post?._id || d.post?.id || d._id || d.id || ''
+
+      // Publishing is asynchronous on PostPeer and the two APIs are near-identical,
+      // so a 202 here very likely means "queued", not "live". Poll only when the
+      // body actually gave us an id — no id means no extra request and no change
+      // from today.
+      if (pid2 && (status === 'publishing' || status === 'pending' || !status)) {
+        // `!status` is the dangerous arm: Zernio's response shape is unverified
+        // (see the note above), so a body naming its field anything but `status`
+        // keeps this true through every iteration of every group. The budget is
+        // what makes that safe rather than fatal.
+        while (Date.now() - publishStart < POLL_BUDGET_MS) {
+          const left = POLL_BUDGET_MS - (Date.now() - publishStart)
+          await new Promise((res) => setTimeout(res, Math.min(1000, Math.max(200, left))))
+          try {
+            const gr = await fetch(`${ZERNIO}/posts/${encodeURIComponent(pid2)}`, { headers: authHeaders() })
+            if (!gr.ok) break
+            const gj = await gr.json()
+            const post = gj.post || gj || {}
+            status = post.status || status
+            if (Array.isArray(post.platforms)) plats = post.platforms
+            if (status === 'published' || status === 'failed' || status === 'partial') break
+          } catch { break }
+        }
+      }
+      if (pid2) postIds.push(pid2)
+
+      if (!plats.length) {
+        // No per-platform detail. Exactly the old behaviour, and the same choice
+        // the PostPeer branch makes in the same situation.
+        posted.push(...targets.map((p) => p.platform))
+        continue
+      }
+      allPlats.push(...plats)
+      const ok2 = (x) => x.success === true || x.status === 'published'
+      posted.push(...plats.filter(ok2).map((x) => x.platform))
+      errors.push(...plats.filter((x) => !ok2(x))
+        .map((x) => `${x.platform}: ${x.errorMessage || x.error || x.status || 'failed'}`))
+      urls.push(...plats.filter(ok2).filter((x) => x.platformPostUrl)
+        .map((x) => `${x.platform}: ${x.platformPostUrl}`))
     }
-    // Same reasoning as PostPeer above: `posted` only fills on a 2xx, so an
-    // all-groups-failed result cannot be told apart from a gateway swallowing
-    // the response of a request that WAS processed. The claim stays.
+
     if (!posted.length) {
-      return { ok: false, error: errors.join(' | ') }
+      // Release ONLY when nothing can be live, and only on evidence:
+      //   * nothing was accepted at all and every refusal was an outright 4xx, or
+      //   * every target platform reported itself terminally dead.
+      // Anything else — a 5xx, a silent platform, a queued post we lost track of —
+      // is UNKNOWN, and unknown keeps the claim. Releasing on a post that is
+      // actually in flight is how the whole set gets published twice.
+      const provablyNothingSent = !anyAccepted && everyRefusalOutright && errors.length > 0
+      if (provablyNothingSent || (allPlats.length && nothingIsLive(allTargets, allPlats))) {
+        await releasePostOnce(fp)
+      }
+      return { ok: false, error: errors.join(' | ') || 'Zernio accepted nothing and said nothing' }
     }
-    return { ok: true, platforms: posted, ...(errors.length ? { partialErrors: errors } : {}) }
+    return {
+      ok: true, platforms: posted,
+      ...(postIds.length ? { postId: postIds.join(',') } : {}),
+      ...(errors.length ? { partialErrors: errors } : {}),
+      ...(urls.length ? { postUrls: urls } : {}),
+    }
   } catch (e) {
     await releasePostOnce(fp)
     return { ok: false, error: `${provider()} unreachable: ` + (e?.message || String(e)) }

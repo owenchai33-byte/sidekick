@@ -309,7 +309,13 @@ describe('per-agent rule isolation', () => {
     await expect(saveRule('', { rule: 'x' })).rejects.toThrow(/profile required/)
     // and a read for an unknown profile returns empty, never someone else's
     delete process.env.BLOB_READ_WRITE_TOKEN
-    expect(await getRules('nobody')).toEqual({ rules: [] })
+    const r = await getRules('nobody')
+    expect(r.rules).toEqual([])
+    // A read now also SAYS which kind of empty this is, so an orphaned agent is
+    // never silently indistinguishable from an untrained one. found:false with
+    // degraded:false is the honest "looked everywhere, nothing is there".
+    expect(r.found).toBe(false)
+    expect(r.degraded).toBe(false)
   })
 })
 

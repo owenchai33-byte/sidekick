@@ -6,6 +6,7 @@
 // overwrite of a fixed URL); reads take the newest and prune the rest.
 
 import { put, list, del } from '@vercel/blob'
+import { readThrough, newestFirst } from './identity.js'
 
 const PREFIX = 'style/'
 const tok = () => process.env.BLOB_READ_WRITE_TOKEN
@@ -15,20 +16,45 @@ const KEEP_VERSIONS = 3
 
 async function versions(profileId, t) {
   const { blobs } = await list({ prefix: `${PREFIX}${profileId}`, token: t, limit: 25 })
-  return blobs.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+  return newestFirst(blobs)
 }
+
+// --- read-through, and the three states a read can be in ---------------------
+//
+// getStyle used to return the SAME { style:'', examples:[] } for five different
+// things: no blob token, no blob, a fetch that failed, unparseable JSON, and an
+// agent who genuinely has not trained anything. That single conflation IS the
+// silent loss. After a provider change the trained style is still sitting under
+// the OLD profile id, the read looks only under the new one, gets empty, and
+// the next caption comes out in the default format on a paying client's public
+// page with nobody told.
+//
+// Two things change. A read now walks EVERY key this agent has ever been known
+// by instead of one. And it says which of three things happened:
+//
+//   found:true                    a blob was read and had content — use it
+//   found:false, degraded:false   looked everywhere, nothing is there
+//                                 (the correct answer for an untrained agent)
+//   found:false, degraded:true    the STORE failed. NOT the same as empty, and
+//                                 callers must not read it as "untrained".
+//
+// `source` names the key that answered — 'primary', 'legacy:<oldId>', 'none' or
+// 'degraded' — and is reported out through /api/ingest, so "did the fallback
+// fire?" is answered by the response instead of by guesswork.
+
+// The walk itself lives in _lib/identity.js so style, rules and brand all fall
+// back identically.
+
+const EMPTY_STYLE = () => ({ style: '', examples: [] })
 
 export async function getStyle(profileId) {
   const t = tok()
-  if (!t || !profileId) return { style: '', examples: [] }
-  try {
-    const v = await versions(profileId, t)
-    if (!v.length) return { style: '', examples: [] }
-    const r = await fetch(v[0].url, { cache: 'no-store' })
-    if (!r.ok) return { style: '', examples: [] }
-    const j = await r.json()
-    return { style: j.style || '', examples: Array.isArray(j.examples) ? j.examples : [] }
-  } catch { return { style: '', examples: [] } }
+  if (!t || !profileId) return { ...EMPTY_STYLE(), found: false, degraded: false, source: 'none' }
+  const r = await readThrough(PREFIX, profileId, t, {
+    parse: (j) => ({ style: j.style || '', examples: Array.isArray(j.examples) ? j.examples : [] }),
+    isEmpty: (v) => !v.style && !v.examples.length,
+  })
+  return { ...(r.value || EMPTY_STYLE()), found: r.found, degraded: r.degraded, source: r.source }
 }
 
 export async function saveStyle(profileId, { style, examples }) {
@@ -44,6 +70,9 @@ export async function saveStyle(profileId, { style, examples }) {
       : cur.examples,
     updatedAt: new Date().toISOString(),
   }
+  // Said out loud so a read can tell a deliberate clear from a stray empty write
+  // — see the note in _lib/identity.js readThrough().
+  data.cleared = !data.style && !data.examples.length
   const blob = await put(`${PREFIX}${profileId}.json`, JSON.stringify(data), {
     access: 'public', token: t, contentType: 'application/json', addRandomSuffix: true,
   })
@@ -85,20 +114,21 @@ const MAX_RULES = 40
 
 async function ruleVersions(profileId, t) {
   const { blobs } = await list({ prefix: `${RULES_PREFIX}${profileId}`, token: t, limit: 25 })
-  return blobs.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+  return newestFirst(blobs)
 }
 
+// Rules fall back exactly as the style does, and for the same money. The three
+// Owen has trained — never call a condo an apartment, use the first photo as the
+// cover, area name in CAPS and no fire emoji — are stored under rules/<id> and
+// had no migration path in any tooling in this repo before this.
 export async function getRules(profileId) {
   const t = tok()
-  if (!t || !profileId) return { rules: [] }
-  try {
-    const v = await ruleVersions(profileId, t)
-    if (!v.length) return { rules: [] }
-    const r = await fetch(v[0].url, { cache: 'no-store' })
-    if (!r.ok) return { rules: [] }
-    const j = await r.json()
-    return { rules: Array.isArray(j.rules) ? j.rules : [] }
-  } catch { return { rules: [] } }
+  if (!t || !profileId) return { rules: [], found: false, degraded: false, source: 'none' }
+  const r = await readThrough(RULES_PREFIX, profileId, t, {
+    parse: (j) => ({ rules: Array.isArray(j.rules) ? j.rules : [] }),
+    isEmpty: (v) => !v.rules.length,
+  })
+  return { rules: r.value?.rules || [], found: r.found, degraded: r.degraded, source: r.source }
 }
 
 /** Add one rule (deduped), or replace the whole set when `replace` is given. */
@@ -119,7 +149,7 @@ export async function saveRule(profileId, { rule, replace }) {
     rules.push(clean)
   }
   rules = rules.slice(-MAX_RULES)
-  const data = { rules, updatedAt: new Date().toISOString() }
+  const data = { rules, updatedAt: new Date().toISOString(), cleared: rules.length === 0 }
   const blob = await put(`${RULES_PREFIX}${profileId}.json`, JSON.stringify(data), {
     access: 'public', token: t, contentType: 'application/json', addRandomSuffix: true,
   })

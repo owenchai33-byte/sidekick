@@ -8,10 +8,14 @@
 //
 //   GET  /api/style?profile=<id>              → { style, examples }
 //   GET  /api/style?profile=<id>&kind=brand   → { color, name, region }
+//   GET  /api/style?profile=<id>&kind=agent   → { agentId, previousIds, postingProfile }
 //   POST /api/style { profile, style, examples }        → saves the style
 //   POST /api/style { profile, kind:"brand", color, name, region } → saves the brand
+//   POST /api/style { profile, kind:"agent", previousIds, postingProfile } → the registry
+//                                                          (REQUIRES x-ingest-secret)
 import { getStyle, saveStyle, getRules, saveRule } from './_lib/style.js'
 import { getBrand, saveBrand } from './_lib/brand.js'
+import { getAgentRecord, saveAgentRecord } from './_lib/identity.js'
 import { clientIp, hasIngestSecret, rateLimit } from './_lib/tenant.js'
 
 // THIS ROUTE IS NOT AUTHENTICATED, AND IT COULD NOT BE MADE SO TODAY. Written
@@ -95,6 +99,19 @@ export default async function handler(req, res) {
     if (!profile) return send(res, 400, { error: 'profile required' })
     if ((url.searchParams.get('kind') || '') === 'brand') return send(res, 200, await getBrand(profile))
     if ((url.searchParams.get('kind') || '') === 'rules') return send(res, 200, await getRules(profile))
+    // The agent record: which ids this agent used to be known by, and which
+    // provider profile their posts go to. Readable without a credential, like
+    // every other GET here — it holds ids, not secrets, and the migration tool,
+    // the selftest and the health check all need to read it back to VERIFY a
+    // migration. Gating it would put a silent refusal in the middle of the one
+    // check that proves the migration worked.
+    //
+    // `null` for an agent with no record is the honest answer and the one the
+    // caller needs: it means "this agent resolves to itself", which is exactly
+    // what the code does.
+    if ((url.searchParams.get('kind') || '') === 'agent') {
+      return send(res, 200, (await getAgentRecord(profile)) || { agentId: profile, previousIds: [], postingProfile: {}, exists: false })
+    }
     return send(res, 200, await getStyle(profile))
   }
 
@@ -116,6 +133,28 @@ export default async function handler(req, res) {
       // calling saveRule() directly, which is what the unit tests had been doing.
       if ((body?.kind || '') === 'rules') {
         return send(res, 200, await saveRule(profile, { rule: body?.rule, replace: body?.rules }))
+      }
+      // THE ONE WRITE HERE THAT IS GATED, and gating it refuses nothing that
+      // works today because nothing has ever sent it.
+      //
+      // The long note at the top of this file explains why style, brand and rule
+      // writes cannot be given a credential: four of their writers are scripts
+      // outside this repo that send none, and gating them would take away the
+      // commands agents use to teach the system. A brand-new `kind` has no such
+      // writers, so it starts gated instead of inheriting the exception.
+      //
+      // It is worth gating on its own merits: this record decides WHICH ACCOUNTS
+      // an agent's listings publish to. A stranger who could write it could point
+      // one agent's posts at another agent's Facebook.
+      if ((body?.kind || '') === 'agent') {
+        if (!hasIngestSecret(req)) {
+          return send(res, 401, { error: 'the agent registry needs x-ingest-secret — it decides which accounts a listing publishes to' })
+        }
+        return send(res, 200, await saveAgentRecord(profile, {
+          label: body?.label,
+          previousIds: body?.previousIds,
+          postingProfile: body?.postingProfile,
+        }))
       }
       return send(res, 200, await saveStyle(profile, { style: body?.style, examples: body?.examples }))
     } catch (e) {

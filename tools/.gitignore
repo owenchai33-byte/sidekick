@@ -1,0 +1,5 @@
+# Undo journals written by migrate-agent.mjs --copy. They hold a snapshot of a
+# live agent's trained settings, they are machine-local recovery state, and they
+# are the ONE way back from a --force overwrite — so they are kept on disk and
+# kept out of git.
+migrations/
