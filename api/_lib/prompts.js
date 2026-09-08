@@ -66,6 +66,45 @@ ${rawText}
  * agree, and it holds exactly until one of them is fixed — so the promise is
  * made structural instead.
  */
+// DID THE AGENT SAY WHAT KIND OF PROPERTY IT IS, OR DID THE PARSER DECIDE?
+//
+// buildParsePrompt asks the model for `propertyType` out of a fixed list, and
+// the model obliges whether or not the agent said one. Owen's RENNA listing on
+// 2026-09-08 named the building, the floor, the size and the rent, and never
+// used a type word - and the published Facebook caption read "🏢 Condo", with
+// "#CondoForRent" on the TikTok cut. It is very probably right. It is still a
+// fact nobody stated, published under an agent's name.
+//
+// The same inference has already cost something: Edward's listing said only
+// "1 Bedroom Unit", the parser answered "Apartment", the facts block asserted
+// it, and the model wrote the exact word his rule forbade. bannedByRules was
+// the patch for that - one agent, one word. This is the general case, and it
+// follows the rule the rest of this file already keeps: the facts block is the
+// one place a guess must never go. The parse is still free to be right; it just
+// stops being quoted to the model as something the agent said.
+//
+// Only the words that NAME a type count. "Residence" is deliberately absent -
+// it is in half the condo names in Malaysia, RENNA RESIDENCE included, so
+// counting it would let a building's name vouch for its own type.
+const TYPE_WORDS = new RegExp([
+  'condo(?:minium)?', 'apartment', 'serviced\\s*(?:apartment|residence|suite)',
+  'terrace', 'teres', 'semi[\\s-]?d\\b', 'semi[\\s-]?detached', 'detached',
+  'bungalow', 'banglo', 'town\\s?house', 'cluster', 'link\\s?house',
+  'shop\\s?lot', 'shoplot', 'shop\\s?house', 'kedai',
+  'penthouse', 'duplex', 'soho', 'sofo', 'studio', 'flat', 'villa',
+  'pangsapuri', 'kondominium', 'rumah', 'tanah',
+  'warehouse', 'factory', 'office', 'retail', '\\bland\\b', '\\blot\\b',
+  '公寓', '排屋', '半独立', '半獨立', '独立式', '獨立式', '洋房', '店屋', '组屋', '組屋', '楼中楼', '樓中樓',
+].join('|'), 'i')
+
+/**
+ * True when the agent's own message names a property type, so quoting one back
+ * to the model is repeating them rather than inventing.
+ */
+export function propertyTypeStated(listing) {
+  return TYPE_WORDS.test(String(listing?.rawText || ''))
+}
+
 function bannedByRules(word, rules) {
   const w = String(word || '').trim().toLowerCase()
   if (!w) return false
@@ -200,7 +239,7 @@ transaction: "💰 Monthly Rent", "FOR RENT", "Why Rent This Property?",
     // line then handed the model the exact word he forbade - stated as fact, so
     // it wrote it, and two repair rounds could not argue it back out. The rule
     // outranks a field the parser inferred rather than read.
-    listing.propertyType && !bannedByRules(listing.propertyType, rules)
+    listing.propertyType && propertyTypeStated(listing) && !bannedByRules(listing.propertyType, rules)
       && `Property type: ${listing.propertyType}`,
     listing.bedrooms != null && `Bedrooms: ${listing.bedrooms}`,
     listing.bathrooms != null && `Bathrooms: ${listing.bathrooms}`,
@@ -424,7 +463,7 @@ export function buildReelPrompt(listing, styleGuide, rules) {
     // not know the state, and a guess in the facts block is the one place a guess
     // must never go.
     listing.location && `Location: ${listing.location}`,
-    listing.propertyType && `Type: ${listing.propertyType}`,
+    listing.propertyType && propertyTypeStated(listing) && `Type: ${listing.propertyType}`,
     listing.bedrooms != null && `${listing.bedrooms} bedrooms`,
     listing.bathrooms != null && `${listing.bathrooms} bathrooms`,
     listing.sqft != null && `${listing.sqft} sq ft`,

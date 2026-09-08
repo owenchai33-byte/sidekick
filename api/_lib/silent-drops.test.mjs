@@ -39,6 +39,8 @@ describe('a banned word never reaches the model as a fact, however the agent phr
     rawText: 'Tropics City 1 Bedroom Unit RM338,000 800 sqft Edward 0183929100',
   }
   const build = (rules) => buildContentPrompt(listing, ['facebook_page'], ['en'], { style: 's', examples: [] }, null, rules)
+  const stated = { ...listing, rawText: `Apartment — ${listing.rawText}` }
+  const buildStated = (rules) => buildContentPrompt(stated, ['facebook_page'], ['en'], { style: 's', examples: [] }, null, rules)
 
   // The phrasing AGENTS.md dictates, plus four ordinary rewordings of it. Only
   // the first was enforced before; the other four leaked.
@@ -50,13 +52,18 @@ describe('a banned word never reaches the model as a fact, however the agent phr
     'Never describe a property as an apartment',
   ])('the facts block does not assert the forbidden word: %s', (rule) => {
     expect(build([rule])).not.toContain('Property type: Apartment')
+    expect(buildStated([rule])).not.toContain('Property type: Apartment')
   })
 
+  // Edward's listing says "1 Bedroom Unit" and never names a type, so
+  // propertyTypeStated() drops it on its own — see property-type-stated.test.mjs.
+  // These cases are about the BAN, so they use a listing where he did write the
+  // word; otherwise they would pass for a reason unrelated to the rule.
   it('still keeps the property type when no rule forbids it', () => {
-    expect(build([])).toContain('Property type: Apartment')
-    expect(build(['Never use emoji in captions'])).toContain('Property type: Apartment')
-    expect(build(['Never say luxury'])).toContain('Property type: Apartment')
-    expect(build(['Keep captions under 5 lines'])).toContain('Property type: Apartment')
+    expect(buildStated([])).toContain('Property type: Apartment')
+    expect(buildStated(['Never use emoji in captions'])).toContain('Property type: Apartment')
+    expect(buildStated(['Never say luxury'])).toContain('Property type: Apartment')
+    expect(buildStated(['Keep captions under 5 lines'])).toContain('Property type: Apartment')
   })
 })
 

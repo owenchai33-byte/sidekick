@@ -1358,17 +1358,26 @@ describe('a banned word never enters the prompt as a fact', () => {
   }
   const build = (rules) => buildContentPrompt(listing, ['facebook_page'], ['en'], { style: 's', examples: [] }, null, rules)
 
+  // Edward's listing above says "1 Bedroom Unit" and never names a type, so
+  // propertyTypeStated() now drops it whatever the rules say — which is the
+  // point of property-type-stated.test.mjs. The cases below are about the BAN,
+  // so they need a listing where the agent did write the word; otherwise they
+  // pass or fail for a reason that has nothing to do with the rule under test.
+  const stated = { ...listing, rawText: `Apartment — ${listing.rawText}` }
+  const buildStated = (rules) => buildContentPrompt(stated, ['facebook_page'], ['en'], { style: 's', examples: [] }, null, rules)
+
   it('drops the property type when their rule forbids that word', () => {
     expect(build(['Never call a condo an apartment'])).not.toContain('Property type: Apartment')
+    expect(buildStated(['Never call a condo an apartment'])).not.toContain('Property type: Apartment')
   })
 
   it('keeps it when they have no such rule', () => {
-    expect(build([])).toContain('Property type: Apartment')
-    expect(build(['Never use emoji in captions'])).toContain('Property type: Apartment')
+    expect(buildStated([])).toContain('Property type: Apartment')
+    expect(buildStated(['Never use emoji in captions'])).toContain('Property type: Apartment')
   })
 
   it('only drops the exact word they named', () => {
     // "never say luxury" must not silently strip an unrelated property type
-    expect(build(['Never say luxury'])).toContain('Property type: Apartment')
+    expect(buildStated(['Never say luxury'])).toContain('Property type: Apartment')
   })
 })
