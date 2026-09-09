@@ -217,14 +217,37 @@ export function demoParse(rawText) {
       // ("RM1,200/month", "RM800 sebulan"); Chinese puts it BEFORE
       // ("月租 RM1,800"). Reading only the first form picked the deposit on
       // every Chinese rental — 押金 RM3,600 instead of 月租 RM1,800.
-      const AFTER = /(?:rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?\s*(?:\/\s*|per\s*|a\s+|se)?(?:mo\b|month|monthly|bulan|月)/gi
-      const BEFORE = /(?:月租|租金|每月|月付)\s*[:：]?\s*(?:rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?/gi
+      // The floor under a monthly rent. Its only job is to separate money from a
+      // COUNT of months, so it sits far below any real Malaysian rent.
+      const RENT_FLOOR = 100
+      const AFTER = /(rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?\s*(?:\/\s*|per\s*|a\s+|se)?(?:mo\b|month|monthly|bulan|月)/gi
+      const BEFORE = /(?:月租|租金|每月|月付)\s*[:：]?\s*(rm\s*)?([\d][\d,]*(?:\.\d+)?)\s*(k|ribu)?/gi
       for (const RE of [AFTER, BEFORE]) {
         let m
         while ((m = RE.exec(t)) !== null) {
-          let n = parseFloat(String(m[1]).replace(/,/g, ''))
+          let n = parseFloat(String(m[2]).replace(/,/g, ''))
           if (Number.isNaN(n)) continue
-          if ((m[2] || '').toLowerCase()) n *= 1000
+          if ((m[3] || '').toLowerCase()) n *= 1000
+          // A COUNT OF MONTHS IS NOT A RENT.
+          //
+          // Measured 2026-09-08 on Owen's RENNA listing. Every Malaysian rental
+          // states its terms in months:
+          //     Security Deposit: 2 months
+          //     Advance Rental: 1 month
+          //     Utilities Deposit: 1 month
+          //     Comm: 1 month + 8% SST
+          // Each matches "<figure> month", so this loop collected 1 and 2 as
+          // monthly rents and Math.max picked one. The real figure - RM2.5k -
+          // carries no "/month" and was never a candidate, so the fallback
+          // parser answered RM1/month. The reel burns the price into the MP4 and
+          // the feed card draws it, so a wrong one travels.
+          //
+          // The tell is not the label. A new one turns up in every third listing
+          // ("Tenancy stamping fee: 1 month") and a list of labels would be
+          // beaten by the next. It is that a rent is MONEY: it carries RM, or it
+          // is too large to be a count of months. Malaysia's cheapest room is in
+          // the hundreds; no rent is RM2.
+          if (!(m[1] || '') && n < RENT_FLOOR) continue
           perMonth.push(Math.round(n))
         }
       }
