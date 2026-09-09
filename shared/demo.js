@@ -5,10 +5,41 @@
 
 import { PLATFORM_MAP } from './constants.js'
 
+// A TRANSACTION NOBODY STATED IS NOT A SALE.
+//
+// Every template here read `listingType === 'rental' ? rent : sale`, so a
+// listing whose type the parser could not determine was advertised as FOR SALE
+// in 12 of 18 outputs — "Property For Sale", "untuk Dijual", "出售" — about a
+// unit whose owner may be letting it. api/ingest.js already refuses to guess
+// this (`listingType: fields.listingType || null`, with a comment saying a wrong
+// type turns a correct caption into a contradiction), and then handed the null
+// straight to a renderer that guessed anyway.
+//
+// It matters most HERE, of all places: this file is the fallback, so it runs
+// exactly when the parse was too weak to read the type in the first place.
+//
+// Third branch is silence, never a hedge. "For sale or rent" would be a second
+// invented claim, not a smaller one.
+const txn = (l, rent, sale, unknown = '') => (
+  l.listingType === 'rental' ? rent : l.listingType === 'sale' ? sale : unknown)
+
+// TWO CLAIMS THIS TEMPLATE USED TO MAKE ON THE AGENT'S BEHALF.
+//
+// "ready for its next OWNER" was printed for a RENTAL — a tenant does not
+// become the owner, and the Malay half said the same thing more strongly
+// ("tuan baharu", a new master). Both now follow the stated transaction.
+//
+// "— great value for the area" was appended to every non-sale caption. That is
+// a market judgement about someone else's property, and no listing this system
+// has ever received contained it. The fallback exists to be the SAFE answer;
+// inventing a valuation is the opposite. Removed, not softened.
+
 function money(listing) {
-  if (listing.price == null) return listing.listingType === 'rental' ? 'Price on ask' : 'Price on ask'
+  if (listing.price == null) return 'Price on ask'
   const n = Number(listing.price).toLocaleString('en-MY')
-  return listing.listingType === 'rental' ? `RM${n}/month` : `RM${n}`
+  // "/month" is itself a claim about the transaction, so it needs the same
+  // evidence the words do.
+  return txn(listing, `RM${n}/month`, `RM${n}`, `RM${n}`)
 }
 
 function beds(listing) {
@@ -54,28 +85,28 @@ const geoMs = (l) => (slug(l) ? `#hartanah${slug(l)} ` : '')
 
 const templates = {
   en: (l) => ({
-    facebook_page: `✨ ${l.propertyType || 'Property'}${inEn(l)} — now available\n\nLooking for a place that just feels right? This ${l.propertyType?.toLowerCase() || 'home'}${l.bedrooms != null ? ` with ${l.bedrooms} bedrooms` : ''}${inEn(l)} is ready for its next owner. ${money(l)}${l.listingType === 'sale' ? '.' : ' — great value for the area.'}\n\n${beds(l)}${l.sqft != null ? ` · ${l.sqft} sq ft` : ''}\n\nDrop me a DM and I'll send over the full details and viewing times. 🏡`,
-    marketplace: `${money(l)} | ${l.propertyType || 'Property'}${atEn(l)}\n${beds(l)}${l.sqft != null ? ` | ${l.sqft} sqft` : ''}${l.furnishing ? ` | ${l.furnishing}` : ''}\nMessage now to view. ${loc(l) ? `${loc(l)} property` : 'Property'} for ${l.listingType === 'rental' ? 'rent' : 'sale'}.`,
-    mudah: `${l.propertyType || 'Property'} for ${l.listingType === 'rental' ? 'Rent' : 'Sale'}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `Well-located in ${loc(l)}. ` : ''}Contact for viewing.`,
-    portals: `${l.propertyType || 'Property'} For ${l.listingType === 'rental' ? 'Rent' : 'Sale'}${inEn(l)}\n\nAsking: ${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `This property is situated in ${loc(l)}, offering convenient access to local amenities. ` : ''}Please contact the marketing agent to arrange an inspection.`,
+    facebook_page: `✨ ${l.propertyType || 'Property'}${inEn(l)} — now available\n\nLooking for a place that just feels right? This ${l.propertyType?.toLowerCase() || 'home'}${l.bedrooms != null ? ` with ${l.bedrooms} bedrooms` : ''}${inEn(l)} ${txn(l, 'is ready for its next tenant', 'is ready for its next owner', 'is available now')}. ${money(l)}.\n\n${beds(l)}${l.sqft != null ? ` · ${l.sqft} sq ft` : ''}\n\nDrop me a DM and I'll send over the full details and viewing times. 🏡`,
+    marketplace: `${money(l)} | ${l.propertyType || 'Property'}${atEn(l)}\n${beds(l)}${l.sqft != null ? ` | ${l.sqft} sqft` : ''}${l.furnishing ? ` | ${l.furnishing}` : ''}\nMessage now to view. ${loc(l) ? `${loc(l)} property` : 'Property'}${txn(l, ' for rent', ' for sale', '')}.`,
+    mudah: `${l.propertyType || 'Property'}${txn(l, ' for Rent', ' for Sale', '')}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `Well-located in ${loc(l)}. ` : ''}Contact for viewing.`,
+    portals: `${l.propertyType || 'Property'}${txn(l, ' For Rent', ' For Sale', '')}${inEn(l)}\n\nAsking: ${money(l)}\n\n${specsEn(l)}\n\n${loc(l) ? `This property is situated in ${loc(l)}, offering convenient access to local amenities. ` : ''}Please contact the marketing agent to arrange an inspection.`,
     tiktok: `POV: you just found a ${l.propertyType?.toLowerCase() || 'home'}${inEn(l)} for ${money(l)} 👀\n\n${beds(l)}\nComment "INFO" and I'll send details 📲\n\n${geoEn(l)}#propertymalaysia`,
-    instagram: `${l.propertyType || 'Property'}${inEn(l)} 🏡\n${money(l)}\n\n${beds(l)}${l.sqft != null ? `\n${l.sqft} sq ft` : ''}\n\nDM to arrange a viewing.\n.\n.\n${geoEn(l)}#propertymalaysia #${l.listingType === 'rental' ? 'forrent' : 'forsale'}`,
+    instagram: `${l.propertyType || 'Property'}${inEn(l)} 🏡\n${money(l)}\n\n${beds(l)}${l.sqft != null ? `\n${l.sqft} sq ft` : ''}\n\nDM to arrange a viewing.\n.\n.\n${geoEn(l)}#propertymalaysia${txn(l, ' #forrent', ' #forsale', '')}`,
   }),
   zh: (l) => ({
-    facebook_page: `✨ ${loc(l)}优质${l.propertyType ? cnType(l.propertyType) : '房产'}，诚意出${l.listingType === 'rental' ? '租' : '售'}\n\n${loc(l) ? `位于${loc(l)}，` : ''}${l.bedrooms != null ? `${l.bedrooms}间睡房` : '空间宽敞'}${l.bathrooms != null ? `、${l.bathrooms}间浴室` : ''}，${l.listingType === 'rental' ? '月租' : '售价'} ${money(l)}。地点方便，生活机能齐全。\n\n有兴趣欢迎私信我，我把详细资料和看房时间发给您。🏡`,
-    marketplace: `${money(l)}｜${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? `${l.bathrooms}厕` : ''}${l.sqft != null ? `｜${l.sqft}平方尺` : ''}\n${loc(l)}${l.listingType === 'rental' ? '出租' : '出售'}，私信预约看房。`,
-    mudah: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}${l.listingType === 'rental' ? '出租' : '出售'}\n${money(l)}\n\n${cnSpecs(l)}\n\n地点优越，欢迎来电安排看房。`,
-    portals: `${loc(l)}${l.propertyType ? cnType(l.propertyType) : '房产'} — ${l.listingType === 'rental' ? '出租' : '出售'}\n\n${l.listingType === 'rental' ? '月租' : '售价'}：${money(l)}\n\n${cnSpecs(l)}\n\n${loc(l) ? `本房产坐落于${loc(l)}，交通便利，邻近各项生活设施。` : '交通便利，邻近各项生活设施。'}有意者请联络经纪安排看房。`,
-    tiktok: `${loc(l)}这间${l.propertyType ? cnType(l.propertyType) : '房子'}只要 ${money(l)}👀\n\n${l.bedrooms != null ? `${l.bedrooms}房 ` : ''}地点超方便\n留言「资料」我私你详情📲\n\n${geoZh(l)}#马来西亚房产 #${l.listingType === 'rental' ? '租房' : '买房'}`,
-    instagram: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? ` ${l.bathrooms}厕` : ''}${l.sqft != null ? `\n${l.sqft} 平方尺` : ''}\n\n私信预约看房。\n.\n.\n${geoZh(l)}#马来西亚房产 #${l.listingType === 'rental' ? '出租' : '出售'}`,
+    facebook_page: `✨ ${loc(l)}优质${l.propertyType ? cnType(l.propertyType) : '房产'}，诚意出${txn(l, '租', '售', '让')}\n\n${loc(l) ? `位于${loc(l)}，` : ''}${l.bedrooms != null ? `${l.bedrooms}间睡房` : '空间宽敞'}${l.bathrooms != null ? `、${l.bathrooms}间浴室` : ''}，${txn(l, '月租', '售价', '价格')} ${money(l)}。${loc(l) ? '地点方便，生活机能齐全。' : ''}\n\n有兴趣欢迎私信我，我把详细资料和看房时间发给您。🏡`,
+    marketplace: `${money(l)}｜${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? `${l.bathrooms}厕` : ''}${l.sqft != null ? `｜${l.sqft}平方尺` : ''}\n${loc(l)}${txn(l, '出租', '出售', '')}，私信预约看房。`,
+    mudah: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'}${txn(l, '出租', '出售', '')}\n${money(l)}\n\n${cnSpecs(l)}\n\n${loc(l) ? '地点优越，' : ''}欢迎来电安排看房。`,
+    portals: `${loc(l)}${l.propertyType ? cnType(l.propertyType) : '房产'}${txn(l, ' — 出租', ' — 出售', '')}\n\n${txn(l, '月租', '售价', '价格')}：${money(l)}\n\n${cnSpecs(l)}\n\n${loc(l) ? `本房产坐落于${loc(l)}，交通便利，邻近各项生活设施。` : ''}有意者请联络经纪安排看房。`,
+    tiktok: `${loc(l)}这间${l.propertyType ? cnType(l.propertyType) : '房子'}只要 ${money(l)}👀\n\n${l.bedrooms != null ? `${l.bedrooms}房 ` : ''}${loc(l) ? '地点超方便' : ''}\n留言「资料」我私你详情📲\n\n${geoZh(l)}#马来西亚房产${txn(l, ' #租房', ' #买房', '')}`,
+    instagram: `${loc(l) ? `${loc(l)} ` : ''}${l.propertyType ? cnType(l.propertyType) : '房产'} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms}房` : ''}${l.bathrooms != null ? ` ${l.bathrooms}厕` : ''}${l.sqft != null ? `\n${l.sqft} 平方尺` : ''}\n\n私信预约看房。\n.\n.\n${geoZh(l)}#马来西亚房产${txn(l, ' #出租', ' #出售', '')}`,
   }),
   ms: (l) => ({
-    facebook_page: `✨ ${l.propertyType || 'Hartanah'}${diMs(l)} — untuk di${l.listingType === 'rental' ? 'sewa' : 'jual'}\n\nSedang cari rumah yang selesa untuk keluarga? ${l.propertyType || 'Rumah'} ini${l.bedrooms != null ? ` dengan ${l.bedrooms} bilik tidur` : ''}${diMs(l)} sedia untuk tuan baharu. ${l.listingType === 'rental' ? 'Sewa' : 'Harga'}: ${money(l)}.\n\n${msSpecsLine(l)}\n\nPM saya untuk maklumat penuh dan masa untuk lihat rumah. 🏡`,
-    marketplace: `${money(l)} | ${l.propertyType || 'Hartanah'}${loc(l) ? ` @ ${loc(l)}` : ''}\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? ` | ${l.sqft} kaki persegi` : ''}\nUntuk di${l.listingType === 'rental' ? 'sewa' : 'jual'}${diMs(l)}. PM untuk tempahan lihat rumah.`,
-    mudah: `${l.propertyType || 'Hartanah'} untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Lokasi strategik di ${loc(l)}. ` : ''}Hubungi untuk tempahan melihat.`,
-    portals: `${l.propertyType || 'Hartanah'} Untuk Di${l.listingType === 'rental' ? 'sewa' : 'jual'}${diMs(l)}\n\nHarga: ${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Hartanah ini terletak di ${loc(l)} dengan akses mudah ke kemudahan setempat. ` : ''}Sila hubungi ejen pemasaran untuk mengatur tinjauan.`,
-    tiktok: `POV: kau jumpa ${l.propertyType?.toLowerCase() || 'rumah'}${diMs(l)} harga ${money(l)} 👀\n\n${l.bedrooms != null ? `${l.bedrooms} bilik ` : ''}lokasi memang best\nComment "INFO" nanti PM details 📲\n\n${geoMs(l)}#propertymalaysia`,
-    instagram: `${l.propertyType || 'Hartanah'}${diMs(l)} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? `\n${l.sqft} kaki persegi` : ''}\n\nPM untuk tempahan lihat rumah.\n.\n.\n${geoMs(l)}#propertymalaysia #${l.listingType === 'rental' ? 'disewa' : 'dijual'}`,
+    facebook_page: `✨ ${l.propertyType || 'Hartanah'}${diMs(l)}${txn(l, ' — untuk disewa', ' — untuk dijual', '')}\n\nSedang cari rumah yang selesa untuk keluarga? ${l.propertyType || 'Rumah'} ini${l.bedrooms != null ? ` dengan ${l.bedrooms} bilik tidur` : ''}${diMs(l)} ${txn(l, 'sedia untuk penyewa baharu', 'sedia untuk tuan baharu', 'kini tersedia')}. ${txn(l, 'Sewa', 'Harga', 'Harga')}: ${money(l)}.\n\n${msSpecsLine(l)}\n\nPM saya untuk maklumat penuh dan masa untuk lihat rumah. 🏡`,
+    marketplace: `${money(l)} | ${l.propertyType || 'Hartanah'}${loc(l) ? ` @ ${loc(l)}` : ''}\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? ` | ${l.sqft} kaki persegi` : ''}\n${txn(l, 'Untuk disewa', 'Untuk dijual', 'Tersedia')}${diMs(l)}. PM untuk tempahan lihat rumah.`,
+    mudah: `${l.propertyType || 'Hartanah'}${txn(l, ' untuk Disewa', ' untuk Dijual', '')}${loc(l) ? ` — ${loc(l)}` : ''}\n${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Lokasi strategik di ${loc(l)}. ` : ''}Hubungi untuk tempahan melihat.`,
+    portals: `${l.propertyType || 'Hartanah'}${txn(l, ' Untuk Disewa', ' Untuk Dijual', '')}${diMs(l)}\n\nHarga: ${money(l)}\n\n${msSpecs(l)}\n\n${loc(l) ? `Hartanah ini terletak di ${loc(l)} dengan akses mudah ke kemudahan setempat. ` : ''}Sila hubungi ejen pemasaran untuk mengatur tinjauan.`,
+    tiktok: `POV: kau jumpa ${l.propertyType?.toLowerCase() || 'rumah'}${diMs(l)} harga ${money(l)} 👀\n\n${l.bedrooms != null ? `${l.bedrooms} bilik ` : ''}${loc(l) ? 'lokasi memang best' : ''}\nComment "INFO" nanti PM details 📲\n\n${geoMs(l)}#propertymalaysia`,
+    instagram: `${l.propertyType || 'Hartanah'}${diMs(l)} 🏡\n${money(l)}\n\n${l.bedrooms != null ? `${l.bedrooms} bilik` : ''}${l.bathrooms != null ? ` ${l.bathrooms} tandas` : ''}${l.sqft != null ? `\n${l.sqft} kaki persegi` : ''}\n\nPM untuk tempahan lihat rumah.\n.\n.\n${geoMs(l)}#propertymalaysia${txn(l, ' #disewa', ' #dijual', '')}`,
   }),
 }
 

@@ -99,52 +99,64 @@ const DEMO_MARKERS = [
   // platform and language at once. It is the one marker that survives a listing
   // so empty the templates collapse to two lines.
   /Price on ask/,
-  // facebook_page
+
+  // facebook_page. The Chinese and Malay openers interpolate the property type,
+  // so they must not be matched literally - `/优质房产，诚意出/` only ever fired
+  // when the type was unknown, and every typed listing walked past it.
   /Property in .+ — now available/,
   /Looking for a place that just feels right\?/i,
-  /ready for its next owner/i,
+  /ready for its next (?:owner|tenant)/i,
+  /\bis available now\. RM/i,
   /send over the full details and viewing times/i,
-  /优质房产，诚意出/,
+  /优质.{0,10}，诚意出/,
   /有兴趣欢迎私信我/,
-  /地点方便，生活机能齐全/,
   /Sedang cari rumah yang selesa untuk keluarga\?/i,
-  /sedia untuk tuan baharu/i,
+  /sedia untuk (?:tuan|penyewa) baharu/i,
+  /\bkini tersedia\./i,
   /PM saya untuk maklumat penuh dan masa untuk lihat rumah/i,
+
   // tiktok
   /POV: you just found a/i,
-  /Comment "INFO" and I'll send details/i,
+  /POV: kau jumpa /i,
+  /Comment "INFO" (?:and I'll send details|nanti PM details)/i,
   /留言「资料」我私你详情/,
-  /这间房子只要|地点超方便/,
-  /POV: kau jumpa rumah di/i,
-  /Comment "INFO" nanti PM details/i,
-  /lokasi memang best/i,
-  // instagram — short templates; the bare "." separator lines are the tell
+  /这间.{0,10}只要 /,
+
+  // instagram - short templates, so the second marker is the bare "." separator
+  // lines the template emits between the copy and the hashtags.
   /DM to arrange a viewing\./i,
   /私信预约看房。/,
   /PM untuk tempahan lihat rumah\./i,
   /\n\.\n\.\n/,
-  // marketplace - the three shortest templates, so their second marker is
-  // structural: the trailing "<place> property for rent." sentence and the
-  // FULLWIDTH pipe the Chinese template uses as a separator. Neither is
-  // something an agent writes by hand.
+
+  // marketplace. The "<price> | " header is the one part that does not depend on
+  // any field being known - it is what still identifies the template once an
+  // unstated transaction stopped printing "for sale."
   /Message now to view\./i,
+  /^RM[\d,]+(?:\/month)? \| /m,
   /\w+ property for (?:rent|sale)\.\s*$/i,
   /Untuk di(?:sewa|jual) di .+\. PM untuk tempahan/i,
   /｜/,
-  // mudah - likewise, the fullwidth-colon spec labels are boilerplate scaffolding
+
+  // mudah and portals. These are label-block templates, and the labels are the
+  // scaffolding: an agent writes "2 bedrooms", not "Bedrooms: 2" on its own line.
+  // They matter because the location-quality sentences that used to carry these
+  // templates are now printed only when a location is actually known.
   /Well-located in /i,
   /Contact for viewing\./i,
-  /地点优越，欢迎来电安排看房/,
-  /(?:睡房|浴室|建筑面积)：/,
+  /地点优越，/,
+  /欢迎来电安排看房/,
   /Lokasi strategik di /i,
   /Hubungi untuk tempahan melihat/i,
-  // portals
   /offering convenient access to local amenities/i,
   /Please contact the marketing agent to arrange an inspection/i,
   /交通便利，邻近各项生活设施/,
   /有意者请联络经纪安排看房/,
   /dengan akses mudah ke kemudahan setempat/i,
   /Sila hubungi ejen pemasaran/i,
+  /^(?:Type|Bedrooms|Bathrooms|Built-up|Asking): /m,
+  /^(?:Jenis|Bilik tidur|Bilik air|Keluasan|Harga): /m,
+  /(?:类型|睡房|浴室|建筑面积|月租|售价|价格)：/,
 ]
 
 // A MONEY FIGURE IN A CAPTION IS NOT AUTOMATICALLY AN INVENTION.
