@@ -25,6 +25,7 @@
 import { describe, it, expect } from 'vitest'
 import { propertyTypeStated } from './prompts.js'
 import { buildContentPrompt, buildReelPrompt } from './prompts.js'
+import { demoContent } from '../../shared/demo.js'
 
 const RENNA = `Brand New RENNA RESIDENCE for Rent
 
@@ -113,5 +114,47 @@ describe('a type the agent DID write is still used', () => {
     const p = buildContentPrompt(listing, ['facebook_page'], ['en'], {}, null,
       ['never call a condo an apartment'])
     expect(p).not.toMatch(/Property type: Apartment/)
+  })
+})
+
+// THE FALLBACK NEVER READS THE PROMPT.
+//
+// Gating buildContentPrompt was not enough, and production said so on
+// 2026-09-09. With the model rate-limited — most of the afternoon, on the free
+// tier — demoContent runs instead and renders `${l.propertyType || 'Property'}`
+// straight into the caption. Two runs in six came back
+// "✨ Condo in The Northbank, Kuching — now available" with the prompt fix
+// already live, because the fallback path never sees the facts block.
+//
+// So the guess is dropped once, in ingest.js, where every renderer downstream
+// inherits it. These tests hold the END of that chain: the caption a rate-limited
+// agent actually receives.
+
+describe('the degraded caption does not carry a guessed type either', () => {
+  const rennaListing = (propertyType) => ({
+    propertyType, listingType: 'rental', price: 2500, location: 'The Northbank, Kuching',
+    bedrooms: 2, bathrooms: 2, sqft: 787, furnishing: 'Fully Furnished', rawText: RENNA,
+  })
+
+  it('says "Property", not "Condo", once the type is dropped', () => {
+    // ingest.js nulls propertyType when the agent never wrote one; this is what
+    // demoContent then produces.
+    const out = demoContent(rennaListing(null), ['facebook_page'], ['en'])
+    const cap = out.facebook_page.en
+    expect(cap).not.toMatch(/condo|apartment/i)
+    expect(cap).toMatch(/Property/)
+  })
+
+  it('still uses a type the agent did write', () => {
+    const cap = demoContent(rennaListing('Condo'), ['facebook_page'], ['en']).facebook_page.en
+    expect(cap).toMatch(/Condo/)
+  })
+
+  it('every language variant is clean, not just English', () => {
+    // The Chinese and Malay templates have their own propertyType slots.
+    const out = demoContent(rennaListing(null), ['facebook_page'], ['en', 'zh', 'ms'])
+    for (const lang of ['en', 'zh', 'ms']) {
+      expect(out.facebook_page[lang] || '', lang).not.toMatch(/condo|apartment/i)
+    }
   })
 })

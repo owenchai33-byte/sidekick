@@ -15,7 +15,7 @@
 // With no secret configured it refuses to run. GET = readiness check.
 
 import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions } from './_lib/postguard.js'
-import { buildParsePrompt, buildContentPrompt, buildReelPrompt } from './_lib/prompts.js'
+import { buildParsePrompt, buildContentPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
@@ -457,6 +457,22 @@ export default async function handler(req, res) {
     // free tier rate-limits — could not read 出租 at all, so every Chinese rental
     // defaulted to 'sale' and its correct caption was refused.
     listingType: fields.listingType || null, rawText: text }
+
+  // AN INFERRED TYPE IS DROPPED HERE, NOT FURTHER DOWN.
+  //
+  // Gating the facts block in buildContentPrompt was not enough, and production
+  // said so on 2026-09-09: with the model rate-limited - which on the free tier
+  // is most of the afternoon - demoContent runs instead, and it renders
+  // `${l.propertyType || 'Property'}` straight into the caption. Two runs in six
+  // came back "✨ Condo in The Northbank, Kuching — now available" with the
+  // prompt fix already deployed, because the fallback never reads the prompt.
+  //
+  // Every renderer downstream already has a correct answer for null - "Property",
+  // "one", "Rental" - so removing the guess once, here, fixes the prompt, both
+  // fallback caption sets, the reel script and the price card together. The
+  // alternative was patching six renderers and finding the seventh in a client's
+  // published post.
+  if (!propertyTypeStated(listing)) listing.propertyType = null
 
   // NOTHING TO SAY, SAID CONFIDENTLY.
   //
