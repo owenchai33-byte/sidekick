@@ -1319,6 +1319,46 @@ export function captionViolations(caption, listing) {
     const place = m[1].toLowerCase().replace(/\s+/g, ' ')
     if (!srcLow.replace(/\s+/g, ' ').includes(place.slice(place.indexOf('to ') + 3, place.indexOf('to ') + 13))) invented.push(m[1].trim())
   }
+  // A CONTACT LINK NOBODY GAVE.
+  //
+  // Edward, 2026-09-08. His Stapok Oaks listing carried no phone number at all,
+  // and the reel caption came back ending:
+  //     📲 WhatsApp for more info: https://wa.me/YourNumber
+  // Three times. Every other check passed it - it is not money, not a room
+  // count, not a material claim, not a distance - so a caption with a dead link
+  // to nobody was one ✅ away from a paying client's TikTok, under his name.
+  //
+  // A contact link is the one line in a property post that exists to be acted
+  // on. Getting it wrong is worse than a typo: the listing looks legitimate,
+  // the buyer taps, and the agent never learns the enquiry was lost.
+  //
+  // THE RULE IS THE SAME ONE THE REST OF THIS FILE USES: a number that is not
+  // in the listing was not given by the agent. wa.me/YourNumber has no digits
+  // at all, so it can never be grounded; wa.me/60123456789 is grounded only if
+  // those digits appear in what the agent actually wrote. Local formatting is
+  // ignored on both sides - agents write 012-345 6789 and the link needs
+  // 60123456789 - so the comparison is on digits, with a leading 60 optional.
+  for (const m of cap.matchAll(/(?:https?:\/\/)?(?:wa\.me|api\.whatsapp\.com\/send\?phone=)\/?([^\s/?#)\]]*)/gi)) {
+    const raw = (m[1] || '').trim()
+    const digits = raw.replace(/\D/g, '')
+    // No digits at all is a placeholder by definition - YourNumber, XXX, [phone].
+    // Fewer than 7 cannot be a Malaysian mobile either way.
+    const grounded = digits.length >= 7 && (() => {
+      const srcDigits = String(known).replace(/\D/g, '')
+      const bare = digits.replace(/^60/, '')
+      return srcDigits.includes(digits) || srcDigits.includes(bare)
+    })()
+    if (!grounded) invented.push(m[0].trim())
+  }
+  // UNFILLED PLACEHOLDERS, whatever they are standing in for.
+  // The same run that produced wa.me/YourNumber also produced
+  // "📍 Location: [Specify Location]" on the feed path when a listing arrived
+  // with no text. A bracketed slot or a YourThing token is never something an
+  // agent wrote; it is the model showing its own scaffolding.
+  for (const m of cap.matchAll(/\[(?:your|specify|insert|enter|add)\b[^\]]{0,40}\]|\byour(?:number|name|phone|link|website|contact)\b/gi)) {
+    if (!srcLow.includes(m[0].toLowerCase())) invented.push(m[0].trim())
+  }
+
   // SALE versus RENT. A caption that states the wrong transaction is making a
   // false claim about the most material fact after the price - and unlike the
   // walks above, the truth is a field the parser already produced. See the long
