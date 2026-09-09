@@ -316,7 +316,45 @@ export function demoParse(rawText) {
 
   const bedM = t.match(/(\d+)\s*(?:bed|bilik|room|房|r\b)/)
   const bathM = t.match(/(\d+)\s*(?:bath|tandas|toilet|厕|b\b)/)
-  const sqftM = t.match(/([\d,]{3,})\s*(?:sq\s?ft|sqft|sf|kaki)/)
+  // LAND IS NOT BUILT-UP, AND THIS PARSER HAD ONE FIELD FOR BOTH.
+  //
+  // `sqft` took the FIRST area figure in the text and there was no landSqft key
+  // at all, so the standard Malaysian terrace line
+  //     "Land area 4,800 sqft, built-up 2,200 sqft"
+  // parsed as sqft = 4800 and threw the agent's real built-up away. The facts
+  // block then states "Built-up area: 4800 sq ft" — more than double the truth,
+  // on the number a buyer uses to work out price per square foot — and
+  // prompts.js's counterweight line, the one that says "this is LAND, not
+  // built-up", could never fire because the field did not exist.
+  //
+  // ONLY AN EXPLICIT AREA LABEL BINDS, AND ONLY IMMEDIATELY IN FRONT. An earlier
+  // attempt matched bare "land" and "tanah" with a twelve-character reach, and
+  // measurement killed it: "Freehold land, 1,500 sqft built up" came out as a
+  // LAND area with the real built-up gone, and "individual land title, 1,450
+  // sqft" — a TENURE phrase, not an area — did the same, with whether it fired
+  // decided by character count. "Landed property, 2,200 sqft" and "hartanah"
+  // were the same trap. So the label has to carry an area word of its own:
+  // "land area", "land size", "luas tanah", never bare "land".
+  //
+  // Anything unlabelled still goes to `sqft` exactly as it does today, so no
+  // size is lost and nothing new is refused. A land-only listing now leaves
+  // sqft null and every renderer omits its built-up line rather than printing
+  // the land figure under a false label — an omission in place of a wrong number.
+  const AREA_RE = /([\d,]{3,})\s*(?:sq\s?ft|sqft|sf|kaki)/g
+  const LAND_LABEL = /(?:land|lot)\s*(?:area|size)|luas\s*tanah|keluasan\s*tanah|(?:地皮|土地)\s*面积$/
+  const BUILT_LABEL = /built[\s-]?up(?:\s*area)?|build[\s-]?up|luas\s*binaan|floor\s*area|建筑面积$/
+  let landSqft = null, bareSqft = null, builtSqft = null, am
+  while ((am = AREA_RE.exec(t)) !== null) {
+    const n = Number(am[1].replace(/,/g, ''))
+    if (!Number.isFinite(n) || n <= 0) continue
+    // Look only at the few characters immediately before the figure. A gap can
+    // never span a digit, so a label only ever claims the figure next to it.
+    const head = t.slice(0, am.index).replace(/[^\w一-鿿]+$/, '')
+    if (LAND_LABEL.test(head.slice(-16))) { if (landSqft == null) landSqft = n }
+    else if (BUILT_LABEL.test(head.slice(-16))) { if (builtSqft == null) builtSqft = n }
+    else if (bareSqft == null) bareSqft = n
+  }
+  const sqftValue = builtSqft != null ? builtSqft : bareSqft
   const typeM = ['Terrace', 'Semi-D', 'Detached', 'Apartment', 'Condo', 'Shoplot', 'Land'].find((x) => t.includes(x.toLowerCase().split('-')[0]))
   // Location: capture the words after at/@/in, preserving original casing.
   //
@@ -361,7 +399,8 @@ export function demoParse(rawText) {
     bedrooms: bedM ? Number(bedM[1]) : null,
     bathrooms: bathM ? Number(bathM[1]) : null,
     propertyType: typeM || null,
-    sqft: sqftM ? Number(sqftM[1].replace(/,/g, '')) : null,
+    sqft: sqftValue,
+    landSqft,
     tenure: /freehold/.test(t) ? 'Freehold' : /leasehold/.test(t) ? 'Leasehold' : null,
     furnishing: /fully furnished/.test(t) ? 'Fully Furnished' : /partial/.test(t) ? 'Partially Furnished' : /unfurnished/.test(t) ? 'Unfurnished' : null,
     title: null,
