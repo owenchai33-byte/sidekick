@@ -790,7 +790,8 @@ export default async function handler(req, res) {
       // Same two causes as the AUTO branch above — say which one it was.
       ...(captionDegraded ? { captionWarning: captionDegradedReason
         ? `✅ will refuse this: ${captionDegradedReason}. This is the agent's real caption and the engine is fine, so re-sending will not change it — fix the caption or the listing text.`
-        : 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it.' } : {}),
+        : 'the AI caption engine failed — this is generic demo text, NOT this agent\'s style. Do not publish it. '
+        + 'It is held, not lost: discard it with `approve <id> skip` and send the listing again once the engine is back.' } : {}),
       ...(styleWarn ? { styleWarning: styleWarn } : {}),
       ...(cardError ? { cardError } : {}), meta,
     })

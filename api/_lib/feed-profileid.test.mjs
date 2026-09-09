@@ -172,10 +172,35 @@ describe('authenticated (sidekick.mjs status/caption, healthcheck, selftest)', (
 
   it('still exposes nothing beyond the public fields plus id and those three', async () => {
     const body = await call('/api/feed?secret=topsecret')
-    expect(Object.keys(body.pending[0]).sort()).toEqual([...PUBLIC_KEYS, 'id', 'profileId', 'kind', 'sourceText'].sort())
+    expect(Object.keys(body.pending[0]).sort()).toEqual([...PUBLIC_KEYS, 'id', 'profileId', 'kind', 'sourceText', 'captionDegraded', 'captionDegradedReason'].sort())
     // A stray top-level `sourceText` on the record is NOT the stored source. The
     // source lives at `source.text` (api/hold.js), and only that is read.
     expect(JSON.stringify(body)).not.toContain('SECRET internal text')
+  })
+
+  it('a degraded held caption is visible to sidekick.mjs caption/status', async () => {
+    // approve.js:282 refuses these at the ✅. Until this field was on a read
+    // path, `caption` printed the boilerplate as "the caption a held post will
+    // actually publish" and `status` listed it as ordinary work, so the human
+    // was shown text nobody could publish and asked to approve it.
+    pending.listPending.mockResolvedValue([{ ...PENDING, captionDegraded: true, captionDegradedReason: 'the AI writer failed' }])
+    const body = await call('/api/feed?secret=topsecret')
+    expect(body.pending[0].captionDegraded).toBe(true)
+    expect(body.pending[0].captionDegradedReason).toBe('the AI writer failed')
+  })
+
+  it('a healthy held caption reports false, not undefined', async () => {
+    // The reader has to be able to tell "not degraded" from "this server is old
+    // enough that it does not say". Those are different answers.
+    const body = await call('/api/feed?secret=topsecret')
+    expect(body.pending[0].captionDegraded).toBe(false)
+  })
+
+  it('and an UNAUTHENTICATED caller still sees neither', async () => {
+    pending.listPending.mockResolvedValue([{ ...PENDING, captionDegraded: true, captionDegradedReason: 'the AI writer failed' }])
+    const body = await call(`/api/feed?profile=${MINE}`)
+    expect(body.pending[0].captionDegraded).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain('the AI writer failed')
   })
 
   it('returns the stored listing text to an authenticated caller', async () => {

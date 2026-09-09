@@ -270,8 +270,15 @@ const FALLBACK = [
    "Shoplot — RM3,500 a month 🏡 #PropertyMalaysia"],
   ["Detached house at Tabuan Jaya, 5 bed 4 bath, price on ask",
    "Detached in Tabuan Jaya  🏡 #TabuanJayaProperty #PropertyMalaysia"],
+  // The listing says "at Jalan Song" and the NEXT LINE begins "Apartment for
+  // sale". demoParse's location capture used to run across that newline, so the
+  // place became "Jalan Song Apartment" and geoTags made #JalanSongApartmentProperty
+  // out of it — a hashtag for a place that does not exist, spoken into the reel.
+  // This row asserted that run-on as correct. Fixed in shared/demo.js by making
+  // the capture's inner separators [^\S\n]; the expectation now reads the place
+  // the agent actually named.
   ["New listing at Jalan Song\nApartment for sale\nRM390,000\n3 bed 2 bath, 900 sqft",
-   "Apartment in Jalan Song Apartment — RM390,000 🏡 #JalanSongApartmentProperty #PropertyMalaysia"],
+   "Apartment in Jalan Song — RM390,000 🏡 #JalanSongProperty #PropertyMalaysia"],
 ]
 
 const reelBodyFor = (text) => ({ mode: 'reel', profileId: 'p1', text, images: ['https://cdn.test/photo1.jpg'] })

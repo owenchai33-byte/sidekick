@@ -288,7 +288,33 @@ export function demoParse(rawText) {
   const sqftM = t.match(/([\d,]{3,})\s*(?:sq\s?ft|sqft|sf|kaki)/)
   const typeM = ['Terrace', 'Semi-D', 'Detached', 'Apartment', 'Condo', 'Shoplot', 'Land'].find((x) => t.includes(x.toLowerCase().split('-')[0]))
   // Location: capture the words after at/@/in, preserving original casing.
-  const locM = (rawText || '').match(/(?:\bat\b|@|\bin\b)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})/)
+  //
+  // A CAPTURED NAME MUST NOT CROSS A LINE. The separators INSIDE the capture
+  // were \s+, which matches a newline, so the name ran on into the next line
+  // whenever that line began with a capital — which is how a WhatsApp listing is
+  // always written. Measured on four ordinary listings:
+  //   "for rent at Vivacity\nFully Furnished"    -> "Vivacity Fully Furnished"
+  //   "for sale @ Batu Kawa\nLand area 6,000"    -> "Batu Kawa Land"
+  //   "for sale in Stutong\nBuilt-up 2,400 sqft" -> "Stutong Built"
+  //   "for rent @ Riverine\nLevel 12"            -> "Riverine Level"
+  // The reel speaks that name into an MP4, shortCaption titles the TikTok with
+  // it and geoTags makes a hashtag of it, and there is no model anywhere on the
+  // fallback path to catch it.
+  //
+  // ONLY THE INNER SEPARATORS CHANGE. The gap between the anchor and the name
+  // stays \s+ on purpose: tightening that one too makes the match FAIL at this
+  // anchor and fall through to a LATER "at"/"in" in the message, which answers
+  // with a DIFFERENT PLACE instead of a shorter one —
+  //   "for sale at\nBatu Kawa\nOwner now staying in Miri"    -> "Miri"
+  //   "for rent in\nVivacity, viewing at Kuching office"     -> "Kuching"
+  //   "at\nRiverine Resort\n5 minutes to school in Padungan" -> "Padungan"
+  // all three of which this file reads correctly today. A garbled name is
+  // obviously garbled; a substituted one is a lie that looks like a fact.
+  //
+  // [^\S\n] is "whitespace that is not a newline", so a name written on one line
+  // is unchanged, a name on the line after the anchor is still found whole, and
+  // a run-on stops at the end of its line.
+  const locM = (rawText || '').match(/(?:\bat\b|@|\bin\b)\s+([A-Z][A-Za-z]+(?:[^\S\n]+[A-Z][A-Za-z]+){0,2})/)
 
   return {
     // AN EXPLICIT SALE OUTRANKS A RENT-SHAPED WORD. `rental` matches "month",

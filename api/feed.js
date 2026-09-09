@@ -118,6 +118,20 @@ export default async function handler(req, res) {
         // listing; the caption guard needs both to prove a caption it is about
         // to show in WhatsApp belongs to this sender. Secret-holders only.
         profileId: p.profileId || null, kind: p.kind || null, sourceText: p.source?.text || null,
+        // WHY THE `caption` ABOVE CANNOT BE READ ON ITS OWN. Every held record
+        // already carries this: ingest.js's REVIEW branch writes it into
+        // putPending and hold.js:178 writes it too, and approve.js:282 reads it
+        // to refuse the tick. No READ path returned it. So `sidekick.mjs
+        // caption` — the one command whose entire job is "print the caption a
+        // held post will actually publish" — printed demo boilerplate unmarked,
+        // and `status` listed it as ordinary work waiting for a ✅. A flag only
+        // the refusal can see arrives after the human has already been shown the
+        // text and asked to approve it.
+        // Secret-holder branch only: publicPending feeds the public home screen
+        // (src/pages/FeedPage.jsx) and renders none of this, so nothing changes
+        // for an unauthenticated caller.
+        captionDegraded: !!p.captionDegraded,
+        captionDegradedReason: p.captionDegradedReason || null,
       }
       : publicPending(p))),
     posts: myPosts.map((p) => {
