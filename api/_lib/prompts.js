@@ -87,7 +87,7 @@ ${rawText}
 // it is in half the condo names in Malaysia, RENNA RESIDENCE included, so
 // counting it would let a building's name vouch for its own type.
 const TYPE_WORDS = new RegExp([
-  'condo(?:minium)?', 'apartment', 'serviced\\s*(?:apartment|residence|suite)',
+  'condo(?:minium)?', 'apartments?', 'apartmen', 'serviced\\s*(?:apartment|residence|suite)',
   'terrace', 'teres', 'semi[\\s-]?d\\b', 'semi[\\s-]?detached', 'detached',
   'bungalow', 'banglo', 'town\\s?house', 'cluster', 'link\\s?house',
   'shop\\s?lot', 'shoplot', 'shop\\s?house', 'kedai',

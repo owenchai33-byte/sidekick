@@ -515,9 +515,26 @@ export default async function handler(req, res) {
     .some((v) => v !== null && v !== undefined && v !== '')
   // Emoji and punctuation are not a listing. Count letters and digits only, so
   // "📸📸" and "-----" read as the empty messages they are.
-  const words = String(text || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-  const hasNumber = /\d/.test(String(text || ''))
-  if (!parsedAnything && !hasNumber && words.length < 60) {
+  // MEASURED IN INFORMATION, NOT CHARACTERS.
+  //
+  // A plain character count quietly refuses Chinese. The same listing -
+  // location, type, room count, price on request - is 91 characters in English
+  // and 22 in Chinese:
+  //     出租 古晋 公寓 两房两厅 价格面议 请私信
+  // so the English one passed this guard and the Chinese one was refused, for
+  // no reason but its script. Half this market writes in Chinese, and Chinese
+  // rentals have already cost this codebase one silent refusal (demoParse could
+  // not read 出租, so every one of them was typed as a SALE).
+  //
+  // One CJK character carries about what an English word does, so it counts for
+  // about as many characters as a word: enough that a real listing clears the
+  // bar in either script.
+  const CJK = /[\u3000-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/gu
+  const raw = String(text || '')
+  const cjkCount = (raw.match(CJK) || []).length
+  const words = raw.replace(CJK, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().length + cjkCount * 4
+  const hasNumber = /\d/.test(raw)
+  if (!parsedAnything && !hasNumber && words < 60) {
     return send(res, 200, {
       ok: false,
       reason: 'no listing to post — this message has photos but no property details. Ask the agent to send the listing text (price, size, location), then run this again with it.',

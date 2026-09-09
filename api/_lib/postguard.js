@@ -74,11 +74,77 @@ export async function releasePostOnce(fp) {
 
 // The exact shape demoContent() produces when the model call fails. Publishing
 // this under an agent's name is worse than publishing nothing.
+// THE GATE KNEW ONE TEMPLATE OUT OF EIGHTEEN.
+//
+// demoContent builds a fallback for six platforms in three languages. Every one
+// of those eighteen is what an agent gets when the model is unavailable - which
+// on the free tier is a good part of the afternoon. This list held four phrases,
+// and all four came from the ENGLISH facebook_page template.
+//
+// Measured 2026-09-09: facebook_page/en was caught; facebook_page/zh,
+// facebook_page/ms and all three tiktok variants sailed through. That matters
+// most on /api/social-broadcast, which publishes a RAW caption with no pendingId
+// - the approve pipeline's guards never see it, and this is the ONLY thing
+// standing between demo boilerplate and a client's page. Chinese and Malay
+// agents had no gate at all.
+//
+// TWO MARKERS ARE STILL REQUIRED TO FIRE, and every template below contributes
+// at least two. That threshold is the false-positive protection, and it has to
+// stay: an agent whose trained style was learned from these captions could
+// legitimately echo one phrase. The instagram templates are only a few lines, so
+// their second marker is the bare "." separator lines the template emits - an
+// artifact of the boilerplate, not something a person types.
 const DEMO_MARKERS = [
+  // demo.js money() emits this exact string whenever price is null, on every
+  // platform and language at once. It is the one marker that survives a listing
+  // so empty the templates collapse to two lines.
+  /Price on ask/,
+  // facebook_page
   /Property in .+ — now available/,
   /Looking for a place that just feels right\?/i,
   /ready for its next owner/i,
   /send over the full details and viewing times/i,
+  /优质房产，诚意出/,
+  /有兴趣欢迎私信我/,
+  /地点方便，生活机能齐全/,
+  /Sedang cari rumah yang selesa untuk keluarga\?/i,
+  /sedia untuk tuan baharu/i,
+  /PM saya untuk maklumat penuh dan masa untuk lihat rumah/i,
+  // tiktok
+  /POV: you just found a/i,
+  /Comment "INFO" and I'll send details/i,
+  /留言「资料」我私你详情/,
+  /这间房子只要|地点超方便/,
+  /POV: kau jumpa rumah di/i,
+  /Comment "INFO" nanti PM details/i,
+  /lokasi memang best/i,
+  // instagram — short templates; the bare "." separator lines are the tell
+  /DM to arrange a viewing\./i,
+  /私信预约看房。/,
+  /PM untuk tempahan lihat rumah\./i,
+  /\n\.\n\.\n/,
+  // marketplace - the three shortest templates, so their second marker is
+  // structural: the trailing "<place> property for rent." sentence and the
+  // FULLWIDTH pipe the Chinese template uses as a separator. Neither is
+  // something an agent writes by hand.
+  /Message now to view\./i,
+  /\w+ property for (?:rent|sale)\.\s*$/i,
+  /Untuk di(?:sewa|jual) di .+\. PM untuk tempahan/i,
+  /｜/,
+  // mudah - likewise, the fullwidth-colon spec labels are boilerplate scaffolding
+  /Well-located in /i,
+  /Contact for viewing\./i,
+  /地点优越，欢迎来电安排看房/,
+  /(?:睡房|浴室|建筑面积)：/,
+  /Lokasi strategik di /i,
+  /Hubungi untuk tempahan melihat/i,
+  // portals
+  /offering convenient access to local amenities/i,
+  /Please contact the marketing agent to arrange an inspection/i,
+  /交通便利，邻近各项生活设施/,
+  /有意者请联络经纪安排看房/,
+  /dengan akses mudah ke kemudahan setempat/i,
+  /Sila hubungi ejen pemasaran/i,
 ]
 
 // A MONEY FIGURE IN A CAPTION IS NOT AUTOMATICALLY AN INVENTION.
@@ -1343,11 +1409,16 @@ export function captionViolations(caption, listing) {
     const digits = raw.replace(/\D/g, '')
     // No digits at all is a placeholder by definition - YourNumber, XXX, [phone].
     // Fewer than 7 cannot be a Malaysian mobile either way.
-    const grounded = digits.length >= 7 && (() => {
+    // The agent's OWN link, pasted verbatim, is grounded whatever it looks like.
+    // wa.me/message/ABCD1234EFGH1 is WhatsApp's official short-link form and
+    // carries no phone number at all, so a digits-only rule called every one of
+    // them invented and refused the agent's real contact line.
+    const pastedByAgent = raw.length > 0 && srcLow.includes(raw.toLowerCase())
+    const grounded = pastedByAgent || (digits.length >= 7 && (() => {
       const srcDigits = String(known).replace(/\D/g, '')
       const bare = digits.replace(/^60/, '')
       return srcDigits.includes(digits) || srcDigits.includes(bare)
-    })()
+    })())
     if (!grounded) invented.push(m[0].trim())
   }
   // UNFILLED PLACEHOLDERS, whatever they are standing in for.

@@ -178,7 +178,31 @@ export function demoParse(rawText) {
   // bare small numbers like bed/bath counts.
   let price = null
   const priceCandidates = []
-  const re = /(?:rm|myr)\s*([\d.,]+)\s*(k|juta|mil|jt)?|([\d.,]+)\s*(k|juta|mil|jt|ribu)\b/gi
+  // "RM520,000 Kuching" IS NOT RM520 MILLION.
+  //
+  // Measured on production 2026-09-09: 12 of 42 runs fell back to demoParse, and
+  // every one of them read the standard Malaysian sale line as a thousandfold of
+  // itself. The unit group `(k|juta|mil|jt)?` had no right-hand boundary, so the
+  // optional "k" matched the FIRST LETTER OF THE NEXT WORD - and the next word
+  // in a Kuching listing is Kuching. A full stop does not save it either
+  // ("RM338,000. Kuching"), because `[\d.,]+` swallows the stop. Kota Samarahan
+  // and Kenyalang Park do it too. Every agent in this cohort sells in Kuching.
+  //
+  // Nothing downstream catches it: postguard adds listing.price to the set of
+  // amounts a caption is ALLOWED to carry, so the inflated figure is whitelisted
+  // rather than challenged, then brandcard.js burns it onto the cover JPEG and
+  // the reel speaks it into the MP4.
+  //
+  // THE LOOKAHEAD MUST SIT INSIDE THE OPTIONAL GROUP. Writing it as
+  // `(k|juta|mil|jt)?(?![a-z])` looks equivalent and is not: when the lookahead
+  // fails the engine backtracks into `[\d.,]+` and truncates the number instead,
+  // turning "rm338,000nego" into 33800 and "rm450knego" into 45. That trades a
+  // 1000x inflation for a fresh set of wrong numbers. Inside the group, a failed
+  // unit match skips the group and leaves the digits alone.
+  //
+  // `ribu` joins the RM branch here; it was only ever on the bare-number branch,
+  // so "RM250 ribu" read as 250.
+  const re = /(?:rm|myr)\s*([\d.,]+)(?:\s*(k|juta|mil|jt|ribu)(?![a-z]))?|([\d.,]+)\s*(k|juta|mil|jt|ribu)\b/gi
   let mm
   while ((mm = re.exec(t)) !== null) {
     const digits = (mm[1] || mm[3] || '').replace(/,/g, '')
