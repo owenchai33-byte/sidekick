@@ -160,6 +160,49 @@ export function providerStatus() {
   return { provider, hasGemini, hasClaude, hasGroq, chain, configured: chain.length > 0 }
 }
 
+// The human sentence out of a provider's JSON envelope. This message ends up in
+// a WhatsApp reply to an agent and in an operator alert, so `{"error":{"message":
+// "..."}}` is 40 wasted characters of the ~140 each attempt gets.
+function briefly(message) {
+  const body = String(message || '').replace(/^\S+ (?:vision )?\d+:\s*/, '')
+  try {
+    const t = JSON.parse(body)?.error?.message
+    if (t) return String(t).replace(/\s+/g, ' ').trim().slice(0, 140)
+  } catch { /* Every adapter slices the upstream body to 200-300 chars, so a REAL
+    Groq 413 envelope arrives as TRUNCATED JSON and never parses. Falling back to
+    the raw body prints the envelope this function exists to strip — the operator
+    alert is then mostly punctuation. Pull the sentence out by hand instead. */ }
+  const m = body.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/)
+  const text = m ? m[1].replace(/\\(["\\/])/g, '$1').replace(/\\[nrt]/g, ' ') : body
+  return text.replace(/\s+/g, ' ').trim().slice(0, 140)
+}
+
+// EVERY provider's failure, not just the last one.
+//
+// This loop used to keep `lastErr` and throw it, so with the production chain
+// [groq, gemini] the operator was told "Gemini 429: your prepayment credits are
+// depleted" whatever Groq had actually done — and Groq is the primary and the
+// only funded provider, so the message named the wrong system 100% of the time.
+// Measured live 2026-09-09 against /api/generate on production: a 500-token
+// request and a 26,000-token one failed for obviously different reasons and both
+// surfaced the identical Gemini billing string.
+//
+// The throw happens on exactly the same condition as before and the same callers
+// still catch it; only the message changes, plus `attempts` for anything that
+// wants the parts rather than the sentence.
+function chainError(attempts, lastErr) {
+  if (!attempts.length) return lastErr || new Error('all AI providers failed')
+  const err = new Error(attempts
+    .map((a) => `${a.provider}${a.status ? ` ${a.status}` : ''}: ${briefly(a.message)}`)
+    .join(' | '))
+  err.attempts = attempts
+  // The PRIMARY's status, not the last provider's: the primary is what the
+  // product runs on, so that is the number worth acting on.
+  err.status = attempts[0].status ?? null
+  err.cause = lastErr
+  return err
+}
+
 /**
  * Run the active provider with a prompt, returning raw model text.
  * Throws on transport/API errors so the caller can fall back to demo mode.
@@ -169,14 +212,16 @@ export async function runModel(prompt) {
   if (!chain.length) throw new Error('no AI provider configured (set GEMINI_API_KEY)')
   const deadline = Date.now() + retryBudgetMs()
   let lastErr
+  const attempts = []
   for (const p of chain) {
     try { return await withRetry(() => adapterFor(p)(prompt), deadline) } catch (e) {
       lastErr = e
+      attempts.push({ provider: p, status: e?.status ?? null, message: String(e?.message || e) })
       // Move to the next provider only if there is time left to try it.
       if (Date.now() >= deadline) break
     }
   }
-  throw lastErr || new Error('all AI providers failed')
+  throw chainError(attempts, lastErr)
 }
 
 async function runGemini(prompt) {
@@ -283,7 +328,17 @@ async function runGroq(prompt, modelOverride) {
     // budget exists? Use it. Waiting is pointless - the budget returns at
     // midnight - and the alternative is falling through to a paid provider, or
     // to nothing, while a perfectly good free allowance sits unused.
-    if (res.status === 429 && /per day|\b(TPD|RPD)\b/i.test(detail) && !modelOverride && model !== GROQ_BACKUP_MODEL) {
+    // 413 IS THE SAME ANSWER IN A DIFFERENT STATUS. Groq rejects a request that
+    // does not fit the per-MINUTE token allowance with 413 request_too_large, not
+    // 429 — and 413 is not in TRANSIENT either, so today it neither waits nor
+    // switches model: it falls straight through to the dead Gemini key and then
+    // to demo text, with gpt-oss-20b's separate per-minute and per-day budgets
+    // untouched. Measured on production 2026-09-09: an oversized request failed
+    // in 1.08s (a retried 429 cannot be that fast) while a small request sent
+    // immediately after succeeded — a size rejection, not an outage.
+    // Deliberately NOT added to TRANSIENT: re-sending the identical oversized
+    // request to the same model would just fail again on the same budget.
+    if ((res.status === 413 || (res.status === 429 && /per day|\b(TPD|RPD)\b/i.test(detail))) && !modelOverride && model !== GROQ_BACKUP_MODEL) {
       return runGroq(prompt, GROQ_BACKUP_MODEL)
     }
     throw err
@@ -399,16 +454,18 @@ export async function runModelVision(prompt, images) {
   }
   const deadline = Date.now() + visionBudgetMs()
   let lastErr
+  const attempts = []
   for (const p of chain) {
     try {
       const text = await withRetry(() => visionAdapterFor(p)(prompt, images), deadline)
       return { text, provider: p }
     } catch (e) {
       lastErr = e
+      attempts.push({ provider: p, status: e?.status ?? null, message: String(e?.message || e) })
       if (Date.now() >= deadline) break
     }
   }
-  throw lastErr || new Error('all vision providers failed')
+  throw chainError(attempts, lastErr)
 }
 
 async function runGeminiVision(prompt, images) {

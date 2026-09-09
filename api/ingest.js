@@ -70,10 +70,24 @@ async function parseText(text, status) {
 async function writeCaption(listing, languages, status, styleGuide, contact, rules) {
   const langs = languages.length ? languages : ['en']
   let content, degraded = false, warnings = []
-  if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
+  let engineError = null
+  if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true; engineError = 'no AI provider is configured' }
   else {
     try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules))) }
-    catch { content = demoContent(listing, ['facebook_page'], langs); degraded = true }
+    catch (e) {
+      // THE ERROR USED TO DIE HERE. `degraded` said THAT the engine failed and
+      // nothing anywhere said WHY, so every WhatsApp reply read "the AI caption
+      // engine failed — retry once the engine is back": no provider, no status,
+      // no timing, and nothing retries. Kept in its OWN field, deliberately not
+      // in `captionDegradedReason`: that field's presence is what approve.js and
+      // both branches below use to say "the engine is fine, this is the agent's
+      // own caption", and putting an engine failure in it would make them tell a
+      // human that demo boilerplate is the agent's real copy.
+      content = demoContent(listing, ['facebook_page'], langs)
+      degraded = true
+      engineError = String(e?.message || e).slice(0, 300)
+      console.error('[ingest] caption engine failed:', engineError)
+    }
   }
   let parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
   let caption = parts.join('\n\n• • •\n\n')
@@ -194,9 +208,9 @@ ${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listin
   // back, instead of being judged once here with no way to fix it. This line
   // remains for the degraded path, where no contract check ran at all.
   if (degraded && inventsPriceHistory(caption, listing)) {
-    return { caption, degraded: true, warnings, reason: 'invented a price reduction the listing never mentioned' }
+    return { caption, degraded: true, warnings, engineError, reason: 'invented a price reduction the listing never mentioned' }
   }
-  return { caption, degraded, warnings }
+  return { caption, degraded, warnings, engineError }
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
@@ -685,13 +699,22 @@ export default async function handler(req, res) {
     ? withBrandCard(media, listing, brand, wantsCard)
     : null
 
-  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [] } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
+  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [], engineError: captionEngineError = null } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
     // Report the same flags as a real post — the dry path is what the health check
     // and any wiring test uses, so it must not look healthier than the real thing.
-    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile, ...settingsReport, ...(styleWarn ? { styleWarning: styleWarn } : {}) })
+    // The healthcheck's only attempt to name a cause reads `error`/`captionWarning`
+    // off this response, and neither has ever been in it — so an operator alert
+    // could say DEGRADED and never say why. Both causes are reported here now,
+    // in the same fields the review path already uses.
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile, ...settingsReport,
+      ...(captionDegraded ? { captionDegradedReason, captionEngineError,
+        captionWarning: captionDegradedReason
+          ? `✅ would refuse this: ${captionDegradedReason}`
+          : `the caption engine failed: ${captionEngineError || 'cause not reported'}` } : {}),
+      ...(styleWarn ? { styleWarning: styleWarn } : {}) })
   }
 
   // A property post needs a photo.
@@ -729,9 +752,10 @@ export default async function handler(req, res) {
       return send(res, 503, {
         ok: false, posted: false, blocked: 'captionDegraded', listing, caption,
         captionDegradedReason,
+        ...(captionEngineError ? { captionEngineError } : {}),
         error: captionDegradedReason
           ? `refusing to auto-publish: ${captionDegradedReason}. The caption engine is fine — this caption does not match the listing, so retrying will produce the same refusal.`
-          : 'the AI caption engine failed — refusing to auto-publish generic demo text. Retry once the engine is back.',
+          : `the AI caption engine failed — refusing to auto-publish generic demo text. Cause: ${captionEngineError || 'not reported'}.${status.configured ? ' Re-send this listing in about a minute; the free per-minute budget refills.' : ' No re-send will help until a provider key is set.'}`,
       })
     }
     const r = await postToConnected({ caption, captionShort, mediaItems, key, profileId: postProfile, platforms })
