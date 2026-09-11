@@ -545,17 +545,32 @@ ${rulesBlock}${voiceBlock}
 LISTING:
 ${facts}
 
-"script" = the SPOKEN voiceover, English, energetic and punchy for a 15-20 second TikTok:
-- Open with a 1-line HOOK that stops the scroll (not "check out this property").
-- Then 2-3 punchy selling points. IMPORTANT: the price, bedrooms, bathrooms and
+"script" = the SPOKEN voiceover, English, for a 15-20 second TikTok. Write it the way
+a friendly local agent talks on a WhatsApp voice note: warm, upbeat, human. Short
+sentences, contractions (it's, you'll), one question, one or two exclamations.
+Measured 2026-09-11: a client called an ad-copy script ("Looking for a strategic
+spot… secure 2 + 1 deposit terms. DM now before it's snapped up!") "not very
+smooth", and the same facts written conversationally read with livelier
+intonation on every voice tested.
+- Open with a 1-line HOOK — a question or a friendly "check this out!".
+- Then the real selling points. IMPORTANT: the price, bedrooms, bathrooms and
   square footage are ALREADY shown on screen for the whole video in a caption bar.
   Reading them out as well makes the reel feel cluttered and repetitive — the
   viewer sees and hears the same three facts at once. Say the price at most ONCE
-  (it is the headline), and do NOT recite beds/baths/sqft. Spend the words on what
-  the numbers cannot show: the standout feature, the condition, the location's
-  practical advantage, who it suits based ONLY on stated facts.
-- End with a fast CTA (e.g. "DM before it's gone").
-- 35-55 words total, ~3-5 short sentences. Spoken style: write numbers as words a voice reads naturally (say "four ninety-eight thousand" not "RM498,000"; "seven ninety-seven square feet"). No emojis, no hashtags, no markdown — it's read aloud.
+  (it is the headline), and do NOT recite beds/baths/sqft. Spend the words on
+  what the listing SAYS that the numbers cannot show: a standout feature, the
+  condition, the deposit or terms, "negotiable". If the listing says little,
+  say little — a short true script beats a padded one. Never supply an
+  advantage it does not state ("easy access", "strategic spot" and "ideal for
+  operations" were all invented for a listing that said none of them).
+- End with a friendly call to action using the agent's name if the listing gives
+  one: "Message Edward for a viewing!". No urgency ("before it's gone", "snapped
+  up") — that is a claim about demand nobody made.
+- 30-50 words total. Write every figure the way the listing writes it — "RM2,800
+  a month", "RM498,000", "825 sq ft", "42 points", "2+1 deposit". Do NOT spell
+  numbers out in words: the voice reads figures correctly, and every word also
+  appears on screen as a subtitle, where "RM2,800" reads better than "RM two
+  thousand eight hundred". No emojis, no hashtags, no markdown — it's read aloud.
 - EVERY WORD must be traceable to the facts above. This is spoken aloud under
   the agent's name, so an invented detail is the agent lying to a buyer. Do not
   reach for atmosphere: no "hidden gem", "vibrant", "prime", "sought-after",
@@ -572,8 +587,13 @@ listing. Write 3-5 SHORT lines carrying the real details, then 4-6 hashtags:
 - line 1: the property NAME and what it is — ${txnUnknown ? 'and NOT whether it is for sale or for rent: the listing never says, so say neither, and use no #..._Sale or #..._Rent hashtag' : isRental ? 'FOR RENT (never "for sale", never a #..._Sale hashtag: this is a rental)' : 'FOR SALE (never "for rent", never a #..._Rent hashtag: this is a sale)'}
 - then: the price, the size and beds/baths, and the single strongest number the
   listing gives (below-value saving, rental income or yield) — one per line
-- last line: how to reach the agent
-- then the hashtags
+- last line: the agent's name and phone number exactly as the listing writes
+  them. Never build a link from the number: on 2026-09-11 a caption ended
+  "WhatsApp: https://wa.me/0183929100", which opens nothing — wa.me needs the
+  country code, and a guessed one is a guess.
+- then the hashtags, made from the listing's own words: never a town, state or
+  area it does not name, and spelled exactly as it spells them (the same caption
+  carried "#Kuching", which the listing never said, and "#DEMALAUT" for Demak Laut)
 Use ONLY facts from the listing above; invent nothing. Emojis are fine here.`
 }
 
