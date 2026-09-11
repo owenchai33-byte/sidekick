@@ -15,7 +15,8 @@
 // With no secret configured it refuses to run. GET = readiness check.
 
 import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions } from './_lib/postguard.js'
-import { buildParsePrompt, buildContentPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
+import { buildParsePrompt, buildContentPrompt, buildRepairPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
+import { formatLost } from './_lib/format.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
@@ -60,6 +61,20 @@ async function parseText(text, status) {
   try { return extractJson(await runModel(buildParsePrompt(text))) } catch { return demoParse(text) }
 }
 
+// Which model answered, from a runModel trace array.
+const answeredBy = (t) => {
+  const a = Array.isArray(t) && t.length ? t[t.length - 1] : null
+  return a ? `${a.provider}/${a.model}${a.fellBackFrom ? ` (backup — ${a.fellBackFrom})` : ''}` : null
+}
+
+// The findings a caption would be REFUSED for as it stands, as opposed to style
+// findings it may publish with. Same rule as the verdict at the end of
+// writeCaption; used to decide whether a repair that lost the agent's format is
+// still better than the caption it replaces.
+const wouldRefuse = (v, ph) => !!ph
+  || nonMoneyInventions(v.invented).length > 0
+  || v.missing.some((m) => /^RM[\d\s]|^(?:the below-value hook|property name)\b/i.test(m))
+
 // Native caption for the brand account: FB-page copy per requested language,
 // joined with a light divider (falls back to labelled demo copy without a key).
 // Returns { caption, degraded, warnings }. `degraded` means the model call FAILED and this is
@@ -71,9 +86,15 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
   const langs = languages.length ? languages : ['en']
   let content, degraded = false, warnings = []
   let engineError = null
-  if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true; engineError = 'no AI provider is configured' }
+  // WHO WROTE THIS CAPTION, and what each repair round did to it. Returned with
+  // the caption. On 2026-09-11 a caption lost its agent's format and nothing
+  // could say whether the backup model, the repair round or the first pass had
+  // written it; the answer had to be read off the text. Now it is recorded.
+  const trace = []
+  if (!status.configured) { content = demoContent(listing, ['facebook_page'], langs); degraded = true; engineError = 'no AI provider is configured'; trace.push({ step: 'write', by: 'demo template', why: engineError }) }
   else {
-    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules))) }
+    const t = []
+    try { content = extractJson(await runModel(buildContentPrompt(listing, ['facebook_page'], langs, styleGuide, contact, rules), t)); trace.push({ step: 'write', by: answeredBy(t) }) }
     catch (e) {
       // THE ERROR USED TO DIE HERE. `degraded` said THAT the engine failed and
       // nothing anywhere said WHY, so every WhatsApp reply read "the AI caption
@@ -87,6 +108,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
       degraded = true
       engineError = String(e?.message || e).slice(0, 300)
       console.error('[ingest] caption engine failed:', engineError)
+      trace.push({ step: 'write', by: 'demo template', why: engineError.slice(0, 160) })
     }
   }
   let parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
@@ -119,27 +141,25 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     // rounds to be corrected.
     let ph = inventsPriceHistory(caption, listing)
     for (let attempt = 0; attempt < 2 && (v.missing.length || v.invented.length || rv.length || ph || (v.marketing || []).length); attempt++) {
+      // THE REPAIR EDITS THE CAPTION; IT DOES NOT REWRITE IT. It used to resend
+      // the whole prompt with the style examples stripped (a token saving) and
+      // "fix ONLY these" — without the caption to fix. So it wrote a fresh one
+      // from the style's one-paragraph description, and on 2026-09-11 Owen's
+      // rental came back with a single "━", its details on one line and its
+      // DEPOSIT & TERMS and COMMISSION sections gone. The caption carries the
+      // format, so the caption is what gets sent back. See buildRepairPrompt.
+      const problems = [
+        ...v.missing.map((m) => `MISSING — the listing states this; include it: ${m}`),
+        ...v.invented.map((x) => `INVENTED — the listing never says this; remove it: ${x}`),
+        ...v.warnings.map((x) => `CHECK — a guess, not a requirement; keep it only if the listing really says it: ${x}`),
+        ...rv.map((r) => `THEIR OWN RULE, broken — fix it, they taught you this: ${r}`),
+        ...(v.marketing || []).map((m) => `MARKETING LANGUAGE THEY NEVER USED — delete it; describe only what they wrote: ${m}`),
+        ...(ph ? ['INVENTED PRICE HISTORY — you claimed this price was reduced. The listing never says so, and there is no earlier or higher asking price. Remove the reduction claim and any earlier figure; state the one price the listing gives.'] : []),
+      ]
+      const previous = { facebook_page: Object.fromEntries(langs.map((l) => [l, content?.facebook_page?.[l]]).filter(([, c]) => c)) }
+      const t = []
       try {
-        // The repair resends the prompt WITHOUT the style examples. Measured
-        // 2026-09-04: the style guide plus its worked examples is ~966 tokens,
-        // resent on every repair round, and two rounds are 43% of the ~13,000
-        // tokens a listing costs. On a free tier that allows 200,000 a day that
-        // is the difference between roughly 15 listings and 22. The examples
-        // teach the model the format; by the repair round it has already written
-        // in that format and is being asked to fix named facts, so the format
-        // instruction earns its place and the examples no longer do.
-        const leanStyle = styleGuide ? { ...styleGuide, examples: [] } : styleGuide
-        const fix = await runModel(`${buildContentPrompt(listing, ['facebook_page'], langs, leanStyle, contact, rules)}
-
-YOUR PREVIOUS ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these and return the
-same JSON shape:
-${v.missing.length ? `- MISSING (the listing states these; include every one): ${v.missing.join('; ')}` : ''}
-${v.invented.length ? `- INVENTED (the listing never says this; REMOVE it): ${v.invented.join('; ')}` : ''}
-${v.warnings.length ? `- CHECK (a guess, not a requirement — include only if the listing really says it): ${v.warnings.join('; ')}` : ''}
-${rv.length ? `- THEIR OWN RULES, broken (fix every one, they taught you these): ${rv.join('; ')}` : ''}
-${(v.marketing || []).length ? `- MARKETING LANGUAGE THEY NEVER USED (delete it; describe only what they wrote): ${v.marketing.join('; ')}` : ''}
-${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listing never says so, and there is no earlier or higher asking price. Remove the reduction claim and any earlier figure; state the one price the listing gives.` : ''}`)
-        const repaired = extractJson(fix)
+        const repaired = extractJson(await runModel(buildRepairPrompt(listing, previous, problems, rules), t))
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
           const rcap = rparts.join('\n\n• • •\n\n')
@@ -148,9 +168,18 @@ ${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listin
           const rph = inventsPriceHistory(rcap, listing)
           const before = v.missing.length + v.invented.length + rv.length + (v.marketing || []).length + (ph ? 1 : 0)
           const after = rvv.missing.length + rvv.invented.length + rrules.length + (rvv.marketing || []).length + (rph ? 1 : 0)
-          if (after < before) { caption = rcap; v = rvv; rv = rrules; ph = rph }
-        }
-      } catch { break /* repair is best-effort; the verdict below still stands */ }
+          // Fewer findings is necessary, not sufficient: a repair that threw the
+          // agent's format away only wins when the caption it replaces would be
+          // refused outright. A style finding is never worth the format.
+          const lost = formatLost(caption, rcap)
+          const accepted = after < before && (!lost || wouldRefuse(v, ph))
+          trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), findings: `${before} → ${after}`, ...(lost ? { formatLost: lost } : {}), accepted })
+          if (accepted) { caption = rcap; content = repaired; v = rvv; rv = rrules; ph = rph }
+        } else trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: 'no caption in the reply' })
+      } catch (e) {
+        trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: String(e?.message || e).slice(0, 160) })
+        break /* repair is best-effort; the verdict below still stands */
+      }
     }
     {
       // A missing MONEY figure is material - an advert that omits the annual
@@ -193,9 +222,14 @@ ${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listin
       // them BY NAME in the two repair rounds above; what changes is that a
       // figure it declines to delete because the figure is true no longer ends
       // the agent's post with "the AI caption engine failed".
+      // What the caption still carries after the repairs, so a finding that
+      // survived both rounds is in the trace rather than silently published.
+      const left = [...v.missing.map((m) => `missing ${m}`), ...v.invented.map((x) => `invented ${x}`),
+        ...rv, ...(v.marketing || []).map((m) => `marketing "${m}"`), ...(ph ? ['invented price history'] : [])]
+      if (left.length) trace.push({ step: 'left in', findings: left.slice(0, 6).map((x) => String(x).slice(0, 120)) })
       const refusable = nonMoneyInventions(v.invented)
       if (refusable.length || blocking.length || ph) {
-        return { caption, degraded: true, warnings: v.warnings,
+        return { caption, degraded: true, warnings: v.warnings, trace,
           reason: `caption breaks the listing contract - ${[...(ph ? ['invented a price reduction the listing never mentions'] : []), ...refusable.map((x)=>`invented "${x}"`), ...blocking.map((x)=>`missing ${x}`)].join('; ').slice(0, 300)}` }
       }
     }
@@ -208,9 +242,9 @@ ${ph ? `- INVENTED PRICE HISTORY: you claimed this price was reduced. The listin
   // back, instead of being judged once here with no way to fix it. This line
   // remains for the degraded path, where no contract check ran at all.
   if (degraded && inventsPriceHistory(caption, listing)) {
-    return { caption, degraded: true, warnings, engineError, reason: 'invented a price reduction the listing never mentioned' }
+    return { caption, degraded: true, warnings, engineError, trace, reason: 'invented a price reduction the listing never mentioned' }
   }
-  return { caption, degraded, warnings, engineError }
+  return { caption, degraded, warnings, engineError, trace }
 }
 
 // Punchy TikTok reel script + short caption (falls back to a simple template).
@@ -705,7 +739,10 @@ export default async function handler(req, res) {
     ? withBrandCard(media, listing, brand, wantsCard)
     : null
 
-  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [], engineError: captionEngineError = null } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
+  const { caption, degraded: captionDegraded, reason: captionDegradedReason = null, warnings: captionWarnings = [], engineError: captionEngineError = null, trace: captionTrace = [] } = await writeCaption(listing, languages, status, styleGuide, contact, agentRules)
+  // One log line per caption naming the model and every repair, so the next
+  // "it forgot my format" is answered from the log, not read off the text.
+  console.log('[ingest] caption trace', JSON.stringify({ sender: meta.sender || null, trace: captionTrace }))
 
   // Wiring test — parse + caption only. No card, no store, no post.
   if (body?.dry === true) {
@@ -715,7 +752,7 @@ export default async function handler(req, res) {
     // off this response, and neither has ever been in it — so an operator alert
     // could say DEGRADED and never say why. Both causes are reported here now,
     // in the same fields the review path already uses.
-    return send(res, 200, { ok: true, mode: 'dry', listing, caption, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile, ...settingsReport,
+    return send(res, 200, { ok: true, mode: 'dry', listing, caption, captionTrace, media, meta, styleApplied, brandApplied, captionDegraded, profileId: postProfile, ...settingsReport,
       ...(captionDegraded ? { captionDegradedReason, captionEngineError,
         captionWarning: captionDegradedReason
           ? `✅ would refuse this: ${captionDegradedReason}`
@@ -756,7 +793,7 @@ export default async function handler(req, res) {
       // reads it to debug the wrong system. writeCaption() already returns the
       // true reason; it just was not being said out loud anywhere.
       return send(res, 503, {
-        ok: false, posted: false, blocked: 'captionDegraded', listing, caption,
+        ok: false, posted: false, blocked: 'captionDegraded', listing, caption, captionTrace,
         captionDegradedReason,
         ...(captionEngineError ? { captionEngineError } : {}),
         error: captionDegradedReason
@@ -811,7 +848,7 @@ export default async function handler(req, res) {
     })
     return send(res, 200, {
       ok: true, mode: 'review', pendingId,
-      caption, card: card || null, cover: feedBase.cover,
+      caption, captionTrace, card: card || null, cover: feedBase.cover,
       mediaCount: mediaItems.length, photoCount: media.length,
       styleApplied, brandApplied, profileId: postProfile, captionDegraded,
       ...settingsReport,

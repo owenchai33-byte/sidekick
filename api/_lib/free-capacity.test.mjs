@@ -52,7 +52,7 @@ describe('the operator is told which provider actually failed', () => {
     // changed is that the chain no longer THROWS it: it collects one
     // {provider, status, message} per attempt and throws the aggregate, so a
     // Groq failure can no longer surface as a Gemini billing error.
-    const loop = SRC.match(/export async function runModel\(prompt\)[\s\S]*?\n\}/)[0]
+    const loop = SRC.match(/export async function runModel\(prompt(?:, trace)?\)[\s\S]*?\n\}/)[0]
     expect(loop).toMatch(/attempts\.push\(\{\s*provider: p, status:/)
     expect(loop).toMatch(/throw chainError\(attempts, lastErr\)/)
     expect(loop).not.toMatch(/throw lastErr/)

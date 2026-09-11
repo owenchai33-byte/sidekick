@@ -114,6 +114,85 @@ function bannedByRules(word, rules) {
   return false
 }
 
+// The transaction, spelled out as words to write and words never to write. One
+// definition, used by the caption prompt and by the repair prompt, so a repair
+// can never be told a looser rule than the caption it is fixing.
+function transactionWording(listing) {
+  const txnTag = transactionTag(listing)
+  const isRental = txnTag === 'FOR RENT'
+  const txnUnknown = txnTag === ''
+  const txnLine = txnUnknown
+    ? `Listing type: NOT STATED — the listing never says whether this property is for sale or for rent, so NEITHER of us knows.
+  TRANSACTION WORDING: do not resolve it. Never write "For Sale", "Selling Price", "Asking Price", "#..._Sale", 出售, 售价, dijual, NOR "For Rent", "To Let", "Monthly Rent", "/month", "#..._Rent", 出租, disewa. State the price as the listing states it and nothing more, and write a call to action that works either way ("Message me for details"). Guessing here puts a false claim about how somebody's home is being sold on their own page.`
+    : isRental
+    ? `Listing type: RENTAL — this property is FOR RENT. It is NOT for sale.
+  TRANSACTION WORDING: every word about the deal says RENT — "For Rent", "Monthly Rent"/"Rental Price" as the price heading, "/month" on the figure, a rent hashtag ("#..._Rent"). NEVER write "Selling Price", "Sale Price", "For Sale", "Why Buy", "Buy this", "Purchase", "Own this", "#..._Sale", 出售, 售价, dijual or harga jual about this property — not in a heading, not in a hashtag, not in a call to action, however an example caption words it.`
+    : `Listing type: SALE — this property is FOR SALE. It is NOT for rent.
+  TRANSACTION WORDING: every word about the deal says SALE — "For Sale", "Selling Price"/"Asking Price" as the price heading, a sale hashtag ("#..._Sale"). NEVER present the property itself as a rental: no "For Rent", "To Let", "#..._Rent", 出租, disewa, and never label the ASKING PRICE as a monthly rent. If the listing states a CURRENT TENANCY, a rental income or a yield, KEEP that figure and label it as what it is ("Currently tenanted at RM1,300/month", "gross ROI 4.62%") — it is a fact about a property that is for sale, and it is the agent's strongest number.`
+  return { isRental, txnUnknown, txnLine }
+}
+
+/**
+ * THE REPAIR ROUND EDITS THE CAPTION IT WAS GIVEN. IT DOES NOT WRITE A NEW ONE.
+ *
+ * Measured 2026-09-11 on Owen's RENNA rental, live: the caption that came back
+ * had a single "━" where the examples have a full ━━━━ rule, every property
+ * detail on ONE line with pipes, 📜 (the style's TENURE emoji) on "Fully Furnished",
+ * and "✅ Highlights" — each one lifted from the one-paragraph DESCRIPTION of
+ * the style ("━ divider", "(type, 🛏️ beds, 🛁 baths, 📐 size, 📜 tenure…)",
+ * "Investment Highlights with ✅"), none of it from the examples. It had also
+ * lost the DEPOSIT & TERMS heading and the COMMISSION section. The same
+ * listing, same style, captioned on 2026-09-08, had all of them.
+ *
+ * Every one of those tells points at this round, the only prompt that carries
+ * the description WITHOUT the examples. It re-sent the whole caption prompt
+ * with the examples stripped out (to save ~900 tokens) and "YOUR PREVIOUS
+ * ATTEMPT BROKE THE LISTING CONTRACT. Fix ONLY these" — but never included the
+ * previous attempt. A model told to fix a caption it cannot see writes a new
+ * one, from the only format description it has left. Any finding at all sends a
+ * caption here: Owen's examples are both SALES, so a rental that copies "💰 Selling
+ * Price" is enough. And the result was accepted because it had fewer findings —
+ * a count that cannot see format. (Nothing recorded which call wrote a caption,
+ * so this was read off the output; writeCaption now returns a trace that says.)
+ *
+ * Now the caption itself is the template. It carries every heading, emoji,
+ * divider and blank line of the agent's format, so it is sent back with the
+ * findings and an instruction to change only those words. It is also far
+ * smaller than the prompt it replaces, which matters on an 8,000-token minute.
+ *
+ * @param previous  { facebook_page: { <lang>: caption } } — the parsed JSON the
+ *                  model returned last time, so every language is edited in place
+ * @param problems  the findings, one plain sentence each
+ */
+export function buildRepairPrompt(listing, previous, problems, rules) {
+  const { txnLine } = transactionWording(listing)
+  const ruleList = (Array.isArray(rules) ? rules : []).filter(Boolean)
+  const source = String(listing?.rawText || '').trim()
+  return `You are editing a property caption. It is written in the agent's OWN house format, and that format is the thing they pay for.
+
+THE CAPTION YOU WROTE (JSON — one caption per language):
+${JSON.stringify(previous, null, 2)}
+
+${source ? `THE AGENT'S OWN LISTING — the only source of facts:
+"""
+${source}
+"""
+
+` : ''}${txnLine}
+${ruleList.length ? `\nTHIS AGENT'S OWN RULES — they told you these; follow every one:\n${ruleList.map((r) => `- ${r}`).join('\n')}\n` : ''}
+FIX EXACTLY THESE, AND NOTHING ELSE:
+${problems.map((p) => `- ${p}`).join('\n')}
+
+HOW TO EDIT:
+- Change only the words the list above names. Every other line stays EXACTLY as it is: the same headings, emoji, dividers (━━━), blank lines, CAPS, section order and length.
+- A wrong word: replace it in the same place, keeping the line's emoji and position ("💰 Selling Price" on a rental becomes "💰 Monthly Rent").
+- A missing fact: add it inside the section where it belongs, written like the lines around it.
+- Something to remove: delete only that line or phrase. Do not rewrite the section around it.
+- Add nothing the agent's listing does not say. Copy their shorthand as written ("Comm" stays "Comm").
+
+Return ONLY the same JSON object with the corrected caption(s) — no markdown, no code fences, no commentary.`
+}
+
 export function buildContentPrompt(listing, platformIds, languageIds, styleGuide, contact, rules) {
   const platforms = platformIds.map((id) => PLATFORM_MAP[id]).filter(Boolean)
   const languages = languageIds.map((id) => LANGUAGE_MAP[id]).filter(Boolean)
@@ -209,17 +288,7 @@ transaction: "💰 Monthly Rent", "FOR RENT", "Why Rent This Property?",
   //
   // Unknown now gets its own branch that states the absence and forbids the
   // model from resolving it. Both known branches are untouched.
-  const txnTag = transactionTag(listing)
-  const isRental = txnTag === 'FOR RENT'
-  const txnUnknown = txnTag === ''
-  const txnLine = txnUnknown
-    ? `Listing type: NOT STATED — the listing never says whether this property is for sale or for rent, so NEITHER of us knows.
-  TRANSACTION WORDING: do not resolve it. Never write "For Sale", "Selling Price", "Asking Price", "#..._Sale", 出售, 售价, dijual, NOR "For Rent", "To Let", "Monthly Rent", "/month", "#..._Rent", 出租, disewa. State the price as the listing states it and nothing more, and write a call to action that works either way ("Message me for details"). Guessing here puts a false claim about how somebody's home is being sold on their own page.`
-    : isRental
-    ? `Listing type: RENTAL — this property is FOR RENT. It is NOT for sale.
-  TRANSACTION WORDING: every word about the deal says RENT — "For Rent", "Monthly Rent"/"Rental Price" as the price heading, "/month" on the figure, a rent hashtag ("#..._Rent"). NEVER write "Selling Price", "Sale Price", "For Sale", "Why Buy", "Buy this", "Purchase", "Own this", "#..._Sale", 出售, 售价, dijual or harga jual about this property — not in a heading, not in a hashtag, not in a call to action, however an example caption words it.`
-    : `Listing type: SALE — this property is FOR SALE. It is NOT for rent.
-  TRANSACTION WORDING: every word about the deal says SALE — "For Sale", "Selling Price"/"Asking Price" as the price heading, a sale hashtag ("#..._Sale"). NEVER present the property itself as a rental: no "For Rent", "To Let", "#..._Rent", 出租, disewa, and never label the ASKING PRICE as a monthly rent. If the listing states a CURRENT TENANCY, a rental income or a yield, KEEP that figure and label it as what it is ("Currently tenanted at RM1,300/month", "gross ROI 4.62%") — it is a fact about a property that is for sale, and it is the agent's strongest number.`
+  const { isRental, txnUnknown, txnLine } = transactionWording(listing)
 
   const facts = [
     txnLine,

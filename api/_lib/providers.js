@@ -206,15 +206,22 @@ function chainError(attempts, lastErr) {
 /**
  * Run the active provider with a prompt, returning raw model text.
  * Throws on transport/API errors so the caller can fall back to demo mode.
+ *
+ * `trace`, when given, is an array the adapter that ANSWERED appends one entry
+ * to: { provider, model, fellBackFrom? }. Nothing recorded which model wrote a
+ * caption, and the Groq adapter silently swaps to its smaller backup on a 413
+ * or a spent day — so on 2026-09-11 a caption came back in a flattened format
+ * and there was no way to say whether the backup model or the repair round had
+ * written it. The answer is now carried out with the caption instead of guessed.
  */
-export async function runModel(prompt) {
+export async function runModel(prompt, trace) {
   const chain = providerChain()
   if (!chain.length) throw new Error('no AI provider configured (set GEMINI_API_KEY)')
   const deadline = Date.now() + retryBudgetMs()
   let lastErr
   const attempts = []
   for (const p of chain) {
-    try { return await withRetry(() => adapterFor(p)(prompt), deadline) } catch (e) {
+    try { return await withRetry(() => adapterFor(p)(prompt, Array.isArray(trace) ? trace : null), deadline) } catch (e) {
       lastErr = e
       attempts.push({ provider: p, status: e?.status ?? null, message: String(e?.message || e) })
       // Move to the next provider only if there is time left to try it.
@@ -224,7 +231,7 @@ export async function runModel(prompt) {
   throw chainError(attempts, lastErr)
 }
 
-async function runGemini(prompt) {
+async function runGemini(prompt, trace) {
   const key = process.env.GEMINI_API_KEY
   if (!key) throw new Error('GEMINI_API_KEY not set')
   const model = process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
@@ -248,10 +255,11 @@ async function runGemini(prompt) {
   const data = await res.json()
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || ''
   if (!text) throw new Error('Gemini returned no text')
+  trace?.push({ provider: 'gemini', model })
   return text
 }
 
-async function runClaude(prompt) {
+async function runClaude(prompt, trace) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error('ANTHROPIC_API_KEY not set')
   const model = process.env.ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL
@@ -280,6 +288,7 @@ async function runClaude(prompt) {
   const data = await res.json()
   const text = (data?.content || []).map((b) => b.text || '').join('')
   if (!text) throw new Error('Anthropic returned no text')
+  trace?.push({ provider: 'claude', model })
   return text
 }
 
@@ -295,7 +304,7 @@ async function runClaude(prompt) {
 // gets a post rather than a refusal.
 const GROQ_BACKUP_MODEL = process.env.GROQ_BACKUP_MODEL || 'openai/gpt-oss-20b'
 
-async function runGroq(prompt, modelOverride) {
+async function runGroq(prompt, trace, modelOverride, fellBackFrom) {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('GROQ_API_KEY not set')
   const model = modelOverride || process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL
@@ -339,13 +348,14 @@ async function runGroq(prompt, modelOverride) {
     // Deliberately NOT added to TRANSIENT: re-sending the identical oversized
     // request to the same model would just fail again on the same budget.
     if ((res.status === 413 || (res.status === 429 && /per day|\b(TPD|RPD)\b/i.test(detail))) && !modelOverride && model !== GROQ_BACKUP_MODEL) {
-      return runGroq(prompt, GROQ_BACKUP_MODEL)
+      return runGroq(prompt, trace, GROQ_BACKUP_MODEL, `${model} ${res.status}${res.status === 429 ? ' (day spent)' : ''}`)
     }
     throw err
   }
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content || ''
   if (!text) throw new Error('Groq returned no text')
+  trace?.push({ provider: 'groq', model, ...(fellBackFrom ? { fellBackFrom } : {}) })
   return text
 }
 
