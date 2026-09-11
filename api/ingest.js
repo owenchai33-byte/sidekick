@@ -277,7 +277,13 @@ async function withBrandCard(media, listing, brand, enabled) {
   if (!first) return { items: media } // video-only — nothing to overlay
   if (!process.env.BLOB_READ_WRITE_TOKEN) return { items: media, cardError: 'no BLOB token' }
   try {
-    const png = await renderBrandCard(first.url, listing, brand || {})
+    // ALL the images, not just the hero. renderBrandCard composes a poster now:
+    // the first photo is the hero and the next three become the strip along its
+    // base. Passing one URL is what made every post use one of the six photos an
+    // agent had just sent, and it is what a paying client called "slapping text
+    // on the photo". Order is the agent's own order, so the hero is whatever
+    // they led with - or whatever `cover` set.
+    const png = await renderBrandCard(media.filter((m) => m.type === 'image').map((m) => m.url), listing, brand || {})
     const blob = await put('ingest/card.png', png, {
       access: 'public', addRandomSuffix: true, contentType: 'image/png',
       token: process.env.BLOB_READ_WRITE_TOKEN,

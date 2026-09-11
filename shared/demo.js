@@ -383,7 +383,14 @@ export function demoParse(rawText) {
   // [^\S\n] is "whitespace that is not a newline", so a name written on one line
   // is unchanged, a name on the line after the anchor is still found whole, and
   // a run-on stops at the end of its line.
-  const locM = (rawText || '').match(/(?:\bat\b|@|\bin\b)\s+([A-Z][A-Za-z]+(?:[^\S\n]+[A-Z][A-Za-z]+){0,2})/)
+  // 📍 IS AN ANCHOR. Half the listings this system receives write the area as
+  // "📍The Northbank, Kuching" with no at/in/@ anywhere, so the fallback parser
+  // returned null and the poster rendered with no area on it at all — the one
+  // line a buyer scans for. The pin is a stronger anchor than the prepositions,
+  // not a weaker one: nobody puts 📍 in front of anything but a place.
+  // No trailing \s+ after the pin, because it is usually written flush.
+  const locM = (rawText || '').match(/📍\s*([A-Z][A-Za-z]+(?:[^\S\n]+[A-Z][A-Za-z]+){0,2})/)
+    || (rawText || '').match(/(?:\bat\b|@|\bin\b)\s+([A-Z][A-Za-z]+(?:[^\S\n]+[A-Z][A-Za-z]+){0,2})/)
 
   return {
     // AN EXPLICIT SALE OUTRANKS A RENT-SHAPED WORD. `rental` matches "month",
