@@ -321,8 +321,11 @@ const REJECTED_OUTRIGHT = new Set([400, 401, 403, 422])
  * Publish caption + media to every connected account on a profile.
  *
  * TikTok caps a PHOTO post's title at 90 chars (it's the slideshow title), so
- * TikTok gets `captionShort`. Zernio has no per-platform text, so it needs two
- * calls; PostPeer takes a per-platform `content` override and does it in one.
+ * TikTok gets `captionShort` as the title and the full caption as its
+ * description. Both providers do this in ONE request with a per-platform
+ * override: PostPeer's per-entry `content`, Zernio's per-entry `customContent`.
+ * (This used to claim Zernio had no per-platform text and sent two requests —
+ * which Zernio merged, publishing TikTok's title on Facebook. See below.)
  *
  * Returns { ok, platforms } (with partialErrors if some platform failed) or
  * { ok:false, reason|error }. Never throws — callers report, they don't crash.
@@ -521,10 +524,49 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
     // so the parsing is strictly additive — more information when the body has
     // it, today's exact behaviour when it does not. A guess about the shape must
     // never turn a successful post into a reported failure.
-    const groups = [
-      { accts: accounts.filter((a) => a.platform === 'tiktok'), content: short },
-      { accts: accounts.filter((a) => a.platform !== 'tiktok'), content: caption },
-    ].filter((g) => g.accts.length)
+    // ONE POST, NOT TWO. THIS WAS BUILT ON A FALSE PREMISE.
+    //
+    // It used to send two posts — TikTok with the short caption, everyone else
+    // with the full one — because the note above this function said "Zernio has
+    // no per-platform text, so it needs two calls". That was never checked: there
+    // was no Zernio key on this machine to check it with. Zernio documents
+    // `customContent` on each platform entry, which "replaces `content`" for that
+    // entry alone.
+    //
+    // What the false premise cost, on 2026-09-11, on a paying client's Facebook
+    // Page: Edward approved a full caption — "🏡 FOR SALE - WESTHILL AVENUE PHASE
+    // 1 ... https://wa.me/60183929100 #PCMY_Sale" — and Facebook published
+    //     Property @ Westhill Avenue Phase 1 at Matang Moyan — RM520,000
+    // twice, bold and then plain. That string exists ONLY in the TikTok request.
+    // This file sent the full caption to Facebook (measured, with fetch
+    // intercepted: POST 1 tiktok/short, POST 2 facebook/full). Two posts with
+    // identical media, submitted back to back, came out the other side as one,
+    // wearing TikTok's text. The approved caption was not the one that posted.
+    //
+    // One request cannot be merged with itself.
+    const groups = [{ accts: accounts, content: caption }]
+    // TIKTOK PHOTO POSTS HAVE TWO TEXT FIELDS, AND WE ONLY EVER FILLED ONE.
+    //
+    // Zernio's TikTok docs: for a photo post, "`content` becomes the photo title
+    // (90 characters, hashtags and URLs stripped), so put the full caption in
+    // `description`" — tiktokSettings.description, up to 4,000 characters. This
+    // file set only `content`, so every TikTok photo post went out as a bare
+    // 90-character title: no caption, no hashtags, no contact link. That is a
+    // large part of why a client called the output "basic" — on TikTok, most of
+    // it was never there.
+    //
+    // A VIDEO is different: its `content` IS the caption, so a reel keeps the
+    // full caption and needs no split. Decided from the media, not the platform.
+    const hasVideo = (mediaItems || []).some((m) => m && m.type === 'video')
+    const targetFor = (a) => {
+      const base = { platform: a.platform, accountId: a.id }
+      if (a.platform !== 'tiktok' || hasVideo) return base
+      return {
+        ...base,
+        customContent: short,
+        platformSpecificData: { tiktokSettings: { description: caption } },
+      }
+    }
 
     // ONE WALL-CLOCK BUDGET FOR THE WHOLE PUBLISH, not six sleeps per group.
     //
@@ -558,7 +600,7 @@ export async function postToConnected({ caption, captionShort, mediaItems, profi
     let everyRefusalOutright = true
 
     for (const g of groups) {
-      const targets = g.accts.map((a) => ({ platform: a.platform, accountId: a.id }))
+      const targets = g.accts.map(targetFor)
       allTargets.push(...targets)
       const names = targets.map((p) => p.platform).join('/')
       const pr = await fetch(`${ZERNIO}/posts`, {

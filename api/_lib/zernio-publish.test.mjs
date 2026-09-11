@@ -278,21 +278,76 @@ describe('the credit check', () => {
   })
 })
 
-describe('TikTok still gets its own shorter caption', () => {
-  it('sends two calls with different text, and reports both platforms', async () => {
-    const long = 'K'.repeat(200)
+// ONE REQUEST, PER-PLATFORM TEXT.
+//
+// This test used to assert `bodies.toHaveLength(2)` — it pinned the bug as the
+// requirement. The two-call design rested on a comment saying "Zernio has no
+// per-platform text", which was never checked. On 2026-09-11 a paying client
+// approved a full caption and his Facebook Page published TikTok's
+// 90-character title instead, twice: two posts with identical media went in,
+// and came out as one, wearing TikTok's text. Zernio documents per-entry
+// `customContent`. One request cannot be merged with itself.
+describe('TikTok gets a title and the full caption, in ONE request', () => {
+  const FB = { _id: 'z1', platform: 'facebook' }, IG = { _id: 'z2', platform: 'instagram' }, TT = { _id: 'z3', platform: 'tiktok' }
+  const long = '🏡 FOR SALE - WESTHILL AVENUE PHASE 1\n💰 RM520,000\n📲 https://wa.me/60183929100\n#PCMY_Sale'
+  const bodiesOf = (calls) => calls.filter((c) => /\/posts$/.test(c.url)).map((c) => JSON.parse(c.init.body))
+
+  it('sends exactly one request for a mixed-platform photo post', async () => {
     const { postToConnected, calls } = await setup({
-      accounts: [{ _id: 'z1', platform: 'facebook' }, { _id: 'z3', platform: 'tiktok' }],
-      publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      accounts: [FB, TT], publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
     })
-    const r = await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://img/1.jpg' }], profileId: 'AGENT1' })
+    const r = await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://img/1.jpg', type: 'image' }], profileId: 'AGENT1' })
     expect(r.ok).toBe(true)
     expect(r.platforms.sort()).toEqual(['facebook', 'tiktok'])
+    expect(bodiesOf(calls)).toHaveLength(1)
+  })
 
-    const bodies = calls.filter((c) => /\/posts$/.test(c.url)).map((c) => JSON.parse(c.init.body))
-    expect(bodies).toHaveLength(2)
-    const tk = bodies.find((b) => b.platforms.some((p) => p.platform === 'tiktok'))
-    expect(tk.content).toBe('short one')
-    expect(bodies.find((b) => b.platforms.some((p) => p.platform === 'facebook')).content).toBe(long)
+  it('Facebook and Instagram publish the FULL caption — the one the agent approved', async () => {
+    const { postToConnected, calls } = await setup({
+      accounts: [FB, IG, TT], publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    })
+    await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://img/1.jpg', type: 'image' }], profileId: 'AGENT1' })
+    const [b] = bodiesOf(calls)
+    expect(b.content).toBe(long)
+    for (const p of b.platforms.filter((x) => x.platform !== 'tiktok')) {
+      expect(p.customContent, p.platform).toBeUndefined()
+    }
+  })
+
+  it('TikTok photo gets the short TITLE and the full caption as its description', async () => {
+    // Zernio: for a photo post "`content` becomes the photo title (90 characters,
+    // hashtags and URLs stripped), so put the full caption in `description`".
+    // Filling only the title is why every TikTok photo post went out captionless.
+    const { postToConnected, calls } = await setup({
+      accounts: [FB, TT], publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    })
+    await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://img/1.jpg', type: 'image' }], profileId: 'AGENT1' })
+    const tk = bodiesOf(calls)[0].platforms.find((p) => p.platform === 'tiktok')
+    expect(tk.customContent).toBe('short one')
+    expect(tk.platformSpecificData.tiktokSettings.description).toBe(long)
+  })
+
+  it('a TikTok VIDEO keeps the full caption — its content IS the caption', async () => {
+    const { postToConnected, calls } = await setup({
+      accounts: [TT], publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    })
+    await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://vid/r.mp4', type: 'video' }], profileId: 'AGENT1' })
+    const [b] = bodiesOf(calls)
+    expect(b.content).toBe(long)
+    const tk = b.platforms.find((p) => p.platform === 'tiktok')
+    expect(tk.customContent).toBeUndefined()
+    expect(tk.platformSpecificData).toBeUndefined()
+  })
+
+  it('the short title is never sent to a platform that is not TikTok', async () => {
+    // The exact failure: TikTok's title on a client's Facebook Page.
+    const { postToConnected, calls } = await setup({
+      accounts: [FB, IG, TT], publish: () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    })
+    await postToConnected({ caption: long, captionShort: 'short one', mediaItems: [{ url: 'https://img/1.jpg', type: 'image' }], profileId: 'AGENT1' })
+    const b = bodiesOf(calls)[0]
+    const nonTikTok = JSON.stringify(b.platforms.filter((p) => p.platform !== 'tiktok'))
+    expect(nonTikTok).not.toContain('short one')
+    expect(b.content).not.toBe('short one')
   })
 })
