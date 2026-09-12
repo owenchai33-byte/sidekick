@@ -2,7 +2,7 @@
 // and generating per-platform × per-language copy. Both instruct the model to
 // return raw JSON only. Files prefixed `_` are not treated as routes by Vercel.
 
-import { resolvePropertyName, bannedWord } from './postguard.js'
+import { resolvePropertyName, bannedWord, waLinkFor } from './postguard.js'
 
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
 import { transactionTag } from '../../shared/txn.js'
@@ -316,6 +316,12 @@ transaction: "💰 Monthly Rent", "FOR RENT", "Why Rent This Property?",
     listing.landSqft != null && `LAND area: ${listing.landSqft} sq ft (this is LAND, not built-up — never describe it as built-up or floor area)`,
     listing.tenure && `Tenure: ${listing.tenure}`,
     listing.furnishing && `Furnishing: ${listing.furnishing}`,
+    // THE LINK, BUILT FOR THEM. Edward's rule is "only show the WhatsApp link",
+    // so the model built one out of his number as he writes it —
+    // https://wa.me/0183929100 — which opens nothing. wa.me needs the
+    // international form. It is handed over ready-made so nothing has to be
+    // composed, and it is only ever offered when the listing carries the number.
+    waLinkFor(listing) && `WHATSAPP LINK: ${waLinkFor(listing)} — this is the agent's OWN number from their message, in the only form wa.me accepts. If their style or their rules call for a WhatsApp link, write EXACTLY this, character for character. NEVER build one yourself from the number as they typed it ("wa.me/01…" is a dead link), and never put a link on a listing that gives no number.`,
   ].filter(Boolean).join('\n')
 
   // When the agent has their own style, IT governs length/tone/format — the
@@ -485,6 +491,11 @@ CRAFT STANDARD — write like a real top agent, not a template:
   * condition or feeling not stated ("cosy", "spacious", "modern", "luxurious") —
     say the SQ FT, not "spacious".
   If it is not in the facts, leave it out. A short honest post beats a padded one.
+- A QUALIFIER BELONGS TO THE FIGURE IT WAS WRITTEN ON. "Rental price: RM2.5k
+  (nego)" means the RENT is negotiable. Keep it on the rent — do not drop it,
+  and never move it onto a commission, deposit, fee or stamp duty. Measured
+  2026-09-12: a caption printed "Comm: 1 month + 8% SST (Negotiable)" about an
+  agent whose commission is nothing of the kind.
 - USE the specifics the agent actually gave — floor/level, "negotiable", furnishing,
   tenure, deposit terms, the agent's own name and number. Those are what make a post
   read like a real agent wrote it; dropping them for lifestyle filler is the failure.
@@ -536,6 +547,7 @@ export function buildReelPrompt(listing, styleGuide, rules) {
     listing.bedrooms != null && `${listing.bedrooms} bedrooms`,
     listing.bathrooms != null && `${listing.bathrooms} bathrooms`,
     listing.sqft != null && `${listing.sqft} sq ft`,
+    waLinkFor(listing) && `WhatsApp link (use EXACTLY this if a link is wanted; never build one from the local number): ${waLinkFor(listing)}`,
     listing.rawText && `Agent's message: ${String(listing.rawText).slice(0, 500)}`,
   ].filter(Boolean).join('\n')
 

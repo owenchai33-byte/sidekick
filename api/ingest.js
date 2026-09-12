@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions } from './_lib/postguard.js'
+import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions, fixWaLinks } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildRepairPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
 import { formatLost } from './_lib/format.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
@@ -112,7 +112,11 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
     }
   }
   let parts = langs.map((l) => content?.facebook_page?.[l]).filter(Boolean)
-  let caption = parts.join('\n\n• • •\n\n')
+  // A wa.me link built from the agent's own number as they TYPE it opens
+  // nothing (Edward's caption carried wa.me/0183929100). The number is theirs,
+  // so only its format is wrong — corrected here, before the contract check, so
+  // what is checked is what publishes. See fixWaLinks in postguard.js.
+  let caption = fixWaLinks(parts.join('\n\n• • •\n\n'), listing)
 
   // THE CAPTION CONTRACT. On 2026-09-02 "Fully Furnished" was published about a
   // unit whose listing never mentioned furnishing, while the listing's own hook
@@ -162,7 +166,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
         const repaired = extractJson(await runModel(buildRepairPrompt(listing, previous, problems, rules), t))
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
-          const rcap = rparts.join('\n\n• • •\n\n')
+          const rcap = fixWaLinks(rparts.join('\n\n• • •\n\n'), listing)
           const rvv = captionViolations(rcap, listing)
           const rrules = ruleViolations(rcap, rules, 'facebook_page')
           const rph = inventsPriceHistory(rcap, listing)
@@ -174,7 +178,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
           const lost = formatLost(caption, rcap)
           const accepted = after < before && (!lost || wouldRefuse(v, ph))
           trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), findings: `${before} → ${after}`, ...(lost ? { formatLost: lost } : {}), accepted })
-          if (accepted) { caption = rcap; content = repaired; v = rvv; rv = rrules; ph = rph }
+          if (accepted) { caption = fixWaLinks(rcap, listing); content = repaired; v = rvv; rv = rrules; ph = rph }
         } else trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: 'no caption in the reply' })
       } catch (e) {
         trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: String(e?.message || e).slice(0, 160) })
@@ -268,7 +272,9 @@ async function reelScript(listing, status, styleGuide, rules) {
   if (status.configured) {
     try {
       const j = extractJson(await runModel(buildReelPrompt(listing, styleGuide, rules)))
-      if (j && j.script) return { script: String(j.script), caption: String(j.caption || ''), degraded: false }
+      // The TikTok caption is where the dead link actually reached a client:
+      // Edward's read "WhatsApp: https://wa.me/0183929100" on 2026-09-12.
+      if (j && j.script) return { script: String(j.script), caption: fixWaLinks(String(j.caption || ''), listing), degraded: false }
     } catch { /* fall through */ }
   }
   const money = listing.price != null ? `RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? ' a month' : ''}` : ''

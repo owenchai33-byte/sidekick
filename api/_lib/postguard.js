@@ -1457,8 +1457,86 @@ export function captionViolations(caption, listing) {
   // round, but only `invented` blocks: a wrong price is a factual error nobody
   // should publish, while a stray "spacious" that survived two repair attempts
   // is not worth losing the listing over. Refusing costs more than the word.
-  const marketing = inventedMarketing(cap, listing)
+  const marketing = [...inventedMarketing(cap, listing), ...movedQualifiers(cap, listing)]
   return { missing, invented, warnings, marketing }
+}
+
+// A QUALIFIER BELONGS TO THE FIGURE IT WAS WRITTEN ON.
+//
+// Owen's RENNA listing says "Rental price: RM2.5k (nego)". Live on 2026-09-12
+// the caption dropped it from the rent and printed "Comm: 1 month + 8% SST
+// (Negotiable)" — his commission is not negotiable, and he never said it was.
+// Nothing caught it: every figure was real, the word was in the source, and
+// only its OWNER had changed.
+//
+// Narrow by design. It fires only when a caption line says negotiable ABOUT a
+// commission, fee, deposit or stamp duty while the listing attaches the word to
+// none of those. A caption that marks the price negotiable, or that repeats a
+// negotiable the listing really did put on a fee, is untouched. Marketing, not
+// invented: it is a misplaced word, and losing the whole post over it would
+// cost the agent more than the word does.
+const NEGOTIABLE = /\b(?:nego|negotiable|negotiate|boleh\s+runding|runding)\b|可议|面议/i
+const NOT_THE_PRICE = /\b(?:comm(?:ission)?|fee|deposit|stamp(?:ing)?\s*duty|sst|legal|utilit)/i
+export function movedQualifiers(caption, listing) {
+  const src = String(listing?.rawText || '')
+  if (!src.trim() || !NEGOTIABLE.test(String(caption || ''))) return []
+  // Which lines of the AGENT'S OWN text carry the qualifier?
+  const srcLines = src.split('\n').filter((l) => NEGOTIABLE.test(l))
+  if (!srcLines.length) return []                       // never said it: inventedMarketing's job, not this one
+  const srcOnAFee = srcLines.some((l) => NOT_THE_PRICE.test(l))
+  if (srcOnAFee) return []                              // they really did negotiate a fee
+  const out = []
+  for (const line of String(caption).split('\n')) {
+    if (!NEGOTIABLE.test(line) || !NOT_THE_PRICE.test(line)) continue
+    out.push(`"${line.trim().slice(0, 80)}" — the listing says negotiable about ${srcLines[0].trim().slice(0, 40)}, not about this`)
+  }
+  return out
+}
+
+// THE AGENT'S OWN NUMBER, AS A LINK THAT ACTUALLY OPENS.
+//
+// Edward's trained rule is "Never show phone number in captions, only show the
+// WhatsApp link", so the model built one from his number exactly as he writes
+// it: https://wa.me/0183929100. That link opens nothing — wa.me needs the
+// international form, country code first and no leading zero. The digits are
+// his, so the provenance walk above passes it happily; whether it DIALS is a
+// different question, and this is the answer to it.
+//
+// Nothing is composed from thin air. A link is only ever built from a number
+// the listing itself carries, and only its FORMAT changes.
+const MY_MOBILE = /(?:\+?60[- ]?|\b0)(1\d)[- ]?(\d{3})[- ]?(\d{4,5})\b/
+
+/** The agent's WhatsApp number in the form wa.me needs, or '' when unknown. */
+export function waNumberFrom(listing) {
+  const m = String(listing?.rawText || '').match(MY_MOBILE)
+  if (!m) return ''
+  const local = `${m[1]}${m[2]}${m[3]}`
+  return local.length >= 9 && local.length <= 10 ? `60${local}` : ''
+}
+
+/** The link itself, or '' — for the prompt, so the model never has to build one. */
+export function waLinkFor(listing) {
+  const n = waNumberFrom(listing)
+  return n ? `https://wa.me/${n}` : ''
+}
+
+/**
+ * Repair a wa.me link that carries the agent's own number in a form that cannot
+ * open. Only their number, only the format — an unrelated number is left alone
+ * for the invented-contact walk to refuse.
+ */
+export function fixWaLinks(text, listing) {
+  const want = waNumberFrom(listing)
+  if (!want || !text) return text
+  const bareWant = want.slice(2)                        // drop the 60
+  // No \s in the digit class: it would swallow the newline after the link and
+  // glue the next line onto it.
+  return String(text).replace(/((?:https?:\/\/)?(?:www\.)?wa\.me\/)(\+?\d[\d -]{6,}\d)/gi, (whole, head, digits) => {
+    const d = digits.replace(/\D/g, '')
+    if (d === want) return whole                        // already dialable
+    const bare = d.replace(/^60/, '').replace(/^0/, '')
+    return bare === bareWant ? `${head}${want}` : whole
+  })
 }
 
 // -- the agent's OWN trained rules, enforced ---------------------------------
