@@ -184,15 +184,83 @@ describe('a spent daily budget moves to the other free model', () => {
     expect(seen).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'gemini'])
   })
 
-  it('a per-MINUTE limit does not switch model — it waits, keeping the better one', async () => {
+  // REVERSED, on production evidence. This used to assert that a per-MINUTE
+  // limit waits on the better model instead of switching. Waiting is only right
+  // if the wait ends in a caption: measured 2026-09-11 12:54 and 2026-09-12
+  // 10:51 (Edward's shoplot), it ended at "gemini 429: Your prepayment credits
+  // are depleted" and the client got demo boilerplate, while gpt-oss-20b's
+  // separate per-minute allowance went unused. One listing is ~13,000 tokens
+  // against 8,000/minute, so that minute is genuinely spent.
+  it('a LONG per-minute wait moves to the backup model, which has its own minute', async () => {
     Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '2000' })
     const models = []
     vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
-      models.push(JSON.parse(opts.body).model)
-      return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 0.3s' } }), { status: 429 })
+      const model = JSON.parse(opts.body).model
+      models.push(model)
+      if (model === 'openai/gpt-oss-120b') {
+        return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 21.6s' } }), { status: 429 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: GOOD } }] }), { status: 200 })
     }))
     const { runModel } = await load()
-    await expect(runModel('x')).rejects.toThrow()
-    expect([...new Set(models)]).toEqual(['openai/gpt-oss-120b'])
+    expect(await runModel('x')).toContain('338,000')
+    // The better model is still asked first.
+    expect(models).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
+  })
+
+  it('a SHORT per-minute wait keeps the better model and waits it out', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '5000' })
+    const models = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      const model = JSON.parse(opts.body).model
+      models.push(model)
+      if (models.length === 1) {
+        return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 0.4s' } }), { status: 429 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: GOOD } }] }), { status: 200 })
+    }))
+    const { runModel } = await load()
+    expect(await runModel('x')).toContain('338,000')
+    expect(models).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-120b'])
+  })
+
+  // Edward's shoplot, 2026-09-12 10:51, replayed end to end.
+  it("Edward's caption: Groq out of minute, Gemini out of credit — a real caption still comes back", async () => {
+    Object.assign(process.env, {
+      AI_PROVIDER: 'groq', AI_FALLBACK_PROVIDER: 'gemini',
+      GROQ_API_KEY: 'gsk_test', GEMINI_API_KEY: 'AIza_test', AI_RETRY_BUDGET_MS: '2000',
+    })
+    const seen = []
+    vi.stubGlobal('fetch', vi.fn(async (url, opts) => {
+      if (/generativelanguage/.test(String(url))) {
+        seen.push('gemini')
+        return new Response(JSON.stringify({ error: { message: 'Your prepayment credits are depleted.' } }), { status: 429 })
+      }
+      const model = JSON.parse(opts.body).model
+      seen.push(model)
+      if (model === 'openai/gpt-oss-120b') {
+        return new Response(JSON.stringify({ error: { message: 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 7913. Please try again in 21.6s' } }), { status: 429 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: GOOD } }] }), { status: 200 })
+    }))
+    const { runModel } = await load()
+    expect(await runModel('caption this listing')).toContain('338,000')
+    // Never reaches the dead key, so nothing degrades to demo text.
+    expect(seen).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
+  })
+
+  it('records which model answered, and that it was a fallback', async () => {
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '2000' })
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      const model = JSON.parse(opts.body).model
+      if (model === 'openai/gpt-oss-120b') {
+        return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000' } }), { status: 429 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: GOOD } }] }), { status: 200 })
+    }))
+    const { runModel } = await load()
+    const trace = []
+    await runModel('x', trace)
+    expect(trace).toEqual([{ provider: 'groq', model: 'openai/gpt-oss-20b', fellBackFrom: 'openai/gpt-oss-120b 429 (minute spent)' }])
   })
 })

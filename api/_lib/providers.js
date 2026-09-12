@@ -303,6 +303,10 @@ async function runClaude(prompt, trace) {
 // trade is a plainer caption instead of no caption at all, and an agent at 9am
 // gets a post rather than a refusal.
 const GROQ_BACKUP_MODEL = process.env.GROQ_BACKUP_MODEL || 'openai/gpt-oss-20b'
+// A rate-limit window this short is worth waiting out on the better model.
+// Anything longer and the caption is better served by the backup model's own
+// minute — see the reasoning at the 429 branch in runGroq.
+const QUICK_RETRY_MS = Number(process.env.GROQ_QUICK_RETRY_MS || 3000)
 
 async function runGroq(prompt, trace, modelOverride, fellBackFrom) {
   const key = process.env.GROQ_API_KEY
@@ -347,8 +351,35 @@ async function runGroq(prompt, trace, modelOverride, fellBackFrom) {
     // immediately after succeeded — a size rejection, not an outage.
     // Deliberately NOT added to TRANSIENT: re-sending the identical oversized
     // request to the same model would just fail again on the same budget.
-    if ((res.status === 413 || (res.status === 429 && /per day|\b(TPD|RPD)\b/i.test(detail))) && !modelOverride && model !== GROQ_BACKUP_MODEL) {
-      return runGroq(prompt, trace, GROQ_BACKUP_MODEL, `${model} ${res.status}${res.status === 429 ? ' (day spent)' : ''}`)
+    //
+    // A PER-MINUTE LIMIT NOW SWITCHES MODEL TOO, and this reverses an earlier
+    // decision ("wait, keeping the better one"). Waiting is only right if the
+    // wait ends in a caption. Measured on production twice: 2026-09-11 12:54
+    // and 2026-09-12 10:51, Edward's shoplot — "groq 429 … on tokens per
+    // minute" then "gemini 429: Your prepayment credits are depleted", so the
+    // wait ended at a dead fallback and the client was handed demo boilerplate
+    // that the publish gate refused. One listing is ~13,000 tokens against an
+    // 8,000/minute allowance, so the minute is genuinely gone; the budget is
+    // metered PER MODEL, and gpt-oss-20b's separate allowance was sitting
+    // untouched the whole time. A plainer caption beats no caption.
+    //
+    // NOT EVERY PER-MINUTE LIMIT. Groq says how long the window has left, and a
+    // short one is worth waiting out on the better model — a caption from
+    // gpt-oss-120b one second later beats a plainer one now. It is the LONG
+    // waits that stranded Edward ("Please try again in 21.6s", twice), because
+    // the wait has to fit inside the retry budget AND the function's own life,
+    // and what it falls through to is a dead key. So: under QUICK_RETRY_MS,
+    // wait (the retry below); over it, take the other model's fresh minute.
+    //
+    // The better model is still tried first, every time, and if the backup is
+    // rate-limited as well the error stays transient — so the wait-and-retry
+    // below still happens, now as the second answer instead of the only one.
+    const spentDay = /per day|\b(TPD|RPD)\b/i.test(detail)
+    const quick = err.retryAfterMs > 0 && err.retryAfterMs <= QUICK_RETRY_MS
+    const switchModel = res.status === 413 || (res.status === 429 && (spentDay || !quick))
+    if (switchModel && !modelOverride && model !== GROQ_BACKUP_MODEL) {
+      const why = res.status === 413 ? 'request too large' : spentDay ? 'day spent' : 'minute spent'
+      return runGroq(prompt, trace, GROQ_BACKUP_MODEL, `${model} ${res.status} (${why})`)
     }
     throw err
   }

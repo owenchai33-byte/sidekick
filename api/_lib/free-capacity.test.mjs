@@ -16,16 +16,30 @@
 // 413 is deliberately NOT added to TRANSIENT: re-sending the identical oversized
 // request to the same model would fail again on the same budget. It switches
 // model, which is where the unused budget is.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 const SRC = readFileSync(new URL('./providers.js', import.meta.url), 'utf8')
 
 describe('a 413 reaches the backup model instead of the dead fallback', () => {
-  it('the daily-limit branch also fires on 413', () => {
-    const line = SRC.split('\n').find((l) => l.includes('GROQ_BACKUP_MODEL') && l.trim().startsWith('if ('))
-    expect(line, 'the model-switch condition').toBeTruthy()
-    expect(line).toMatch(/413/)
+  // Behavioural now, not a grep for "413" on one line: the condition moved into
+  // `switchModel` when a long per-minute wait was added to it (2026-09-12), and
+  // a test that reads a line number tells you nothing about what the code does.
+  it('a 413 is answered by the backup model', async () => {
+    vi.resetModules()
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '2000' })
+    const models = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      const model = JSON.parse(opts.body).model
+      models.push(model)
+      if (model === 'openai/gpt-oss-120b') {
+        return new Response('{"error":{"message":"Request too large for model `openai/gpt-oss-120b`', { status: 413 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":1}' } }] }), { status: 200 })
+    }))
+    const { runModel } = await import('./providers.js')
+    expect(await runModel('x')).toBe('{"ok":1}')
+    expect(models).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
   })
 
   it('413 is NOT retried against the same model', () => {
@@ -39,6 +53,20 @@ describe('a 413 reaches the backup model instead of the dead fallback', () => {
     const line = SRC.split('\n').find((l) => l.includes('GROQ_BACKUP_MODEL') && l.trim().startsWith('if ('))
     expect(line).toMatch(/!modelOverride/)
     expect(line).toMatch(/model !== GROQ_BACKUP_MODEL/)
+  })
+
+  it('the backup is not asked twice when it is rate-limited too', async () => {
+    vi.resetModules()
+    Object.assign(process.env, { AI_PROVIDER: 'groq', GROQ_API_KEY: 'gsk_test', AI_RETRY_BUDGET_MS: '900' })
+    const models = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      models.push(JSON.parse(opts.body).model)
+      return new Response(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 21.6s' } }), { status: 429 })
+    }))
+    const { runModel } = await import('./providers.js')
+    await expect(runModel('x')).rejects.toThrow()
+    // main, then backup — and the backup does not recurse into itself
+    expect(models).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
   })
 })
 
