@@ -1,6 +1,19 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { getProfile, tenantFields, tenantQuery } from '../lib/tenant.js'
+import { isInAppBrowser } from '../lib/inAppBrowser.js'
+import { copyText } from '../lib/clipboard.js'
+
+// DID *THIS* PAGE START THE CONNECT, OR DID WE COME BACK FROM ONE?
+//
+// Module scope, so a fresh page load after the platform redirects back starts
+// false, while a page that never navigated keeps it true. That is the difference
+// between "they went to Facebook and came back with nothing" — worth an
+// explanation — and "the hand-off never happened", which must never be reported
+// as a Facebook Page problem. Measured 2026-09-12: Wilson's tap never reached
+// Facebook, and the poll 2s later would have told him his Page admin rights
+// were wrong.
+let startedHere = false
 
 // Per-agent link is `…/#/connect?profile=<id>`. With HashRouter the query lives
 // inside window.location.hash (not .search), so it is read from there — and
@@ -58,6 +71,11 @@ export default function ConnectPage() {
   const [testResult, setTestResult] = useState('')
   const [returnedEmpty, setReturnedEmpty] = useState('')
   const [callbackError, setCallbackError] = useState('')
+  // The platform link we handed off to, kept on screen so there is always
+  // something to tap if the browser did not follow it by itself.
+  const [handoff, setHandoff] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const inApp = isInAppBrowser(typeof navigator === 'undefined' ? '' : navigator.userAgent)
 
   // WHATEVER THE CALLBACK SAYS, SAY IT.
   //
@@ -108,7 +126,9 @@ export default function ConnectPage() {
       // connected Instagram and TikTok and stalled here with nothing to read.
       try {
         const tried = sessionStorage.getItem('sk_connecting')
-        if (tried) {
+        // `startedHere` gates it: only a page that did NOT start this connect
+        // can be the page they came back to.
+        if (tried && !startedHere) {
           sessionStorage.removeItem('sk_connecting')
           if (!list.some((a) => a.platform === tried)) setReturnedEmpty(tried)
           else setReturnedEmpty('')
@@ -124,7 +144,10 @@ export default function ConnectPage() {
     load()
     let tries = 0
     const poll = setInterval(() => { load(); if (++tries >= 5) clearInterval(poll) }, 2500)
-    const refetch = () => { if (!document.hidden) load() }
+    // Coming back (a real back-tap, or a bfcache restore that keeps React
+    // state) must never leave the button reading "Opening…" and disabled, which
+    // it did until a hard refresh.
+    const refetch = () => { if (!document.hidden) { setBusy(''); load() } }
     window.addEventListener('focus', refetch)
     document.addEventListener('visibilitychange', refetch)
     window.addEventListener('pageshow', refetch)
@@ -136,19 +159,38 @@ export default function ConnectPage() {
     }
   }, [load])
 
+  async function copy(text) {
+    const ok = await copyText(text)
+    setCopied(ok)
+    if (ok) setTimeout(() => setCopied(false), 2500)
+  }
+  const copyPageLink = () => copy(window.location.href)
+
   async function connect(platform) {
     setBusy(platform)
     setError('')
-    // Remembered across the redirect so that, on the way back, we can tell the
-    // difference between "they cancelled" and "it completed and attached
-    // nothing" — which is what a Facebook account with no Page does, silently.
-    try { sessionStorage.setItem('sk_connecting', platform) } catch { /* private mode */ }
+    setHandoff(null)
     try {
       const r = await fetch(`/api/social-connect?platform=${platform}&origin=${encodeURIComponent(window.location.origin)}${q ? `&${q}` : ''}`)
       const j = await r.json()
       if (!r.ok || !j.authUrl) throw new Error(j.error || 'Could not start connect')
-      window.location.href = j.authUrl // hand off to the platform's login/authorize
-    } catch (e) { setError(e.message); setBusy('') }
+      // Set only NOW, with the hand-off about to happen — see `startedHere`.
+      // It used to be written before the fetch, so a connect that failed here
+      // still produced "Facebook finished, but no Page came back" on the next
+      // poll: advice about Page admin rights for a Facebook nobody reached.
+      startedHere = true
+      try { sessionStorage.setItem('sk_connecting', platform) } catch { /* private mode */ }
+      // THE LINK IS ALWAYS OFFERED, whether or not this navigation lands.
+      // Assigning location.href is not guaranteed to go anywhere: inside an
+      // in-app browser, or on a phone whose Facebook app claims the dialog URL,
+      // the tab simply stays — and the button sat on "Opening…" with no way
+      // forward and no way to clear it (no finally, no timeout). Now the real
+      // link is on screen a second later, and a tap on it is an ordinary link
+      // navigation, which those browsers do handle.
+      setHandoff({ platform, url: j.authUrl })
+      window.location.href = j.authUrl
+      setTimeout(() => setBusy(''), 1200)
+    } catch (e) { setError(e.message); setBusy(''); try { sessionStorage.removeItem('sk_connecting') } catch { /* private mode */ } }
   }
 
   async function disconnect(acct) {
@@ -204,6 +246,36 @@ export default function ConnectPage() {
       </header>
 
       {error && <div className="connect-error">{error}</div>}
+
+      {inApp && (
+        <div className="connect-note" style={{ marginTop: 12 }}>
+          <strong>Open this page in Safari or Chrome first.</strong> You're in an
+          app's built-in browser (WhatsApp, Facebook, Instagram), and Facebook
+          will not complete a login inside one. Tap the ⋯ or ↗ button and choose
+          "Open in browser", or copy the link:
+          <div style={{ marginTop: 10 }}>
+            <button className="btn btn-sm btn-subtle" onClick={copyPageLink}>
+              {copied ? 'Copied ✓' : 'Copy my link'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {handoff && (
+        <div className="connect-note" style={{ marginTop: 12 }}>
+          <strong>Didn't {handoff.platform === 'facebook' ? 'Facebook' : handoff.platform === 'instagram' ? 'Instagram' : 'TikTok'} open?</strong>{' '}
+          Some browsers block the jump. Tap this link instead — it is the same
+          sign-in page:
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <a className="btn btn-sm btn-primary" href={handoff.url} rel="noopener">
+              Continue to {handoff.platform === 'facebook' ? 'Facebook' : handoff.platform === 'instagram' ? 'Instagram' : 'TikTok'} →
+            </a>
+            <button className="btn btn-sm btn-subtle" onClick={() => copy(handoff.url)}>
+              {copied ? 'Copied ✓' : 'Copy sign-in link'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="connect-grid">
         {PLATFORMS.map((p) => {
