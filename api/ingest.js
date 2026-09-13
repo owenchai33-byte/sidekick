@@ -157,7 +157,10 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
         ...v.invented.map((x) => `INVENTED — the listing never says this; remove it: ${x}`),
         ...v.warnings.map((x) => `CHECK — a guess, not a requirement; keep it only if the listing really says it: ${x}`),
         ...rv.map((r) => `THEIR OWN RULE, broken — fix it, they taught you this: ${r}`),
-        ...(v.marketing || []).map((m) => `MARKETING LANGUAGE THEY NEVER USED — delete it; describe only what they wrote: ${m}`),
+        // A finding that carries its own instruction (a repeated line, a moved
+        // qualifier) is passed as it is: "delete it" would remove BOTH copies of
+        // a fact the agent gave, when the fix is to keep one.
+        ...(v.marketing || []).map((m) => (m.includes(' — ') ? `CORRECT THIS: ${m}` : `MARKETING LANGUAGE THEY NEVER USED — delete it; describe only what they wrote: ${m}`)),
         ...(ph ? ['INVENTED PRICE HISTORY — you claimed this price was reduced. The listing never says so, and there is no earlier or higher asking price. Remove the reduction claim and any earlier figure; state the one price the listing gives.'] : []),
       ]
       const previous = { facebook_page: Object.fromEntries(langs.map((l) => [l, content?.facebook_page?.[l]]).filter(([, c]) => c)) }

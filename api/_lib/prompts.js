@@ -491,6 +491,12 @@ CRAFT STANDARD — write like a real top agent, not a template:
   * condition or feeling not stated ("cosy", "spacious", "modern", "luxurious") —
     say the SQ FT, not "spacious".
   If it is not in the facts, leave it out. A short honest post beats a padded one.
+- SAY EACH FACT ONCE. A template section with nothing new to put in it is
+  LEFT OUT — never filled by repeating a line from elsewhere in the caption.
+  Measured 2026-09-13: a listing whose only selling points were two remarks
+  ("SNP and MOT legal fee and stamp duty half shared…", "MOC, Valuation borne by
+  purchaser") had both printed in full under the ✨ highlight AND again under
+  "Why Buy This Property?". If the listing is short, the caption is short.
 - A QUALIFIER BELONGS TO THE FIGURE IT WAS WRITTEN ON. "Rental price: RM2.5k
   (nego)" means the RENT is negotiable. Keep it on the rent — do not drop it,
   and never move it onto a commission, deposit, fee or stamp duty. Measured

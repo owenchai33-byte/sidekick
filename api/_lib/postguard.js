@@ -1457,8 +1457,40 @@ export function captionViolations(caption, listing) {
   // round, but only `invented` blocks: a wrong price is a factual error nobody
   // should publish, while a stray "spacious" that survived two repair attempts
   // is not worth losing the listing over. Refusing costs more than the word.
-  const marketing = [...inventedMarketing(cap, listing), ...movedQualifiers(cap, listing)]
+  const marketing = [...inventedMarketing(cap, listing), ...movedQualifiers(cap, listing), ...repeatedLines(cap)]
   return { missing, invented, warnings, marketing }
+}
+
+// THE SAME FACT, TWICE, TO FILL A TEMPLATE.
+//
+// Edward, 2026-09-13, Penview Hotel shoplot. His listing gave a price, a size,
+// a floor and two remarks ("SNP and MOT legal fee and stamp duty half shared…",
+// "MOC, Valuation borne by purchaser"). His template has a "✨" highlight line
+// AND a "Why Buy This Property?" section, the model had nothing else to put in
+// either, and both remarks were printed in full under each — word for word. The
+// contract found nothing: every word was his, no figure was wrong. He asked
+// "SNP MOT repeat 3 times — is it normal?". It is not.
+//
+// Counted within one language part only: the same phone number in the English
+// and Chinese versions is correct. Only lines with substance (20+ letters and
+// digits) count, so short template lines — "2 Bedrooms", a divider, a hashtag —
+// can never trip it. Marketing, not invented: it drives the repair round, which
+// edits in place, and never blocks a post.
+export function repeatedLines(caption) {
+  const out = []
+  for (const part of String(caption || '').split(/\n\s*•\s*•\s*•\s*\n/)) {
+    const seen = new Map()
+    for (const raw of part.split('\n')) {
+      const key = raw.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+      if (key.length < 20) continue
+      if (!seen.has(key)) seen.set(key, { line: raw.trim(), n: 0 })
+      seen.get(key).n++
+    }
+    for (const { line, n } of seen.values()) {
+      if (n > 1) out.push(`"${line.slice(0, 90)}" appears ${n} times — say it once, in the section it belongs to, and remove any heading that is left with nothing under it`)
+    }
+  }
+  return out
 }
 
 // A QUALIFIER BELONGS TO THE FIGURE IT WAS WRITTEN ON.
