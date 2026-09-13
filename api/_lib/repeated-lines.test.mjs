@@ -100,3 +100,74 @@ describe('the prompt says it first, so the repair is rarely needed', () => {
     expect(p).toMatch(/LEFT OUT/)
   })
 })
+
+
+// ---------------------------------------------------------------------------
+// The repair that fixed the repeat left the heading behind. Live output,
+// 2026-09-13, Edward's Penview listing, straight from the deployed engine.
+import { dropEmptySections } from './format.js'
+
+const LIVE_AFTER_REPAIR = `🏡 NEARBY PENVIEW HOTEL PENDING – FIRST FLOOR
+
+✨ Commercial Shoplot for Sale
+
+📍 PENVIEW HOTEL
+
+━━━━━━━━━━━━━━━
+
+💰 Selling Price
+
+RM198,000
+
+━━━━━━━━━━━━━━━
+
+Property Details
+
+🏬 Commercial Shoplot
+
+📐 Built‑up Area: 742.7 sqft
+
+📍 First Floor
+
+✅ SNP and MOT legal fee and stamp duty half shared between vendor and purchaser.
+
+✅ MOC, Valuation borne by purchaser
+
+━━━━━━━━━━━━━━━
+
+Why Buy This Property?
+
+━━━━━━━━━━━━━━━
+
+📲 PM For More Information Or Viewing Arrangement
+
+#PCMY_Sale`
+
+describe('a heading left with nothing under it is removed', () => {
+  it('removes the empty "Why Buy This Property?" and one of its two dividers', () => {
+    const out = dropEmptySections(LIVE_AFTER_REPAIR)
+    expect(out).not.toMatch(/Why Buy This Property/)
+    // everything with substance survives
+    for (const kept of ['RM198,000', '742.7 sqft', 'First Floor', 'SNP and MOT', 'MOC, Valuation', 'PM For More Information', '#PCMY_Sale']) {
+      expect(out).toContain(kept)
+    }
+    // no two dividers left back to back
+    expect(out).not.toMatch(/━{5,}\s*\n\s*━{5,}/)
+    expect((out.match(/━{5,}/g) || []).length).toBe((LIVE_AFTER_REPAIR.match(/━{5,}/g) || []).length - 1)
+  })
+
+  it('never removes a one-line FACT between two dividers', () => {
+    const fact = 'HEADLINE\n\n━━━━━━━━━━━━━━━\n\n💰 RM2,500/month\n\n━━━━━━━━━━━━━━━\n\n📲 PM me'
+    expect(dropEmptySections(fact)).toBe(fact)
+  })
+
+  it('leaves a heading that has content under it', () => {
+    const full = 'X\n\n━━━━━━━━━━━━━━━\n\nWhy Buy This Property?\n\n✅ Corner lot\n\n━━━━━━━━━━━━━━━\n\nY'
+    expect(dropEmptySections(full)).toBe(full)
+  })
+
+  it('leaves a caption with no dividers exactly as it is', () => {
+    const plain = 'Why Buy This Property?\nRM198,000\nPM me'
+    expect(dropEmptySections(plain)).toBe(plain)
+  })
+})

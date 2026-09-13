@@ -42,3 +42,37 @@ export function formatLost(before, after) {
   if (b.lines >= 8 && a.lines < Math.ceil(b.lines * 0.6)) return `lines ${b.lines} → ${a.lines}`
   return null
 }
+
+// A HEADING WITH NOTHING UNDER IT.
+//
+// Edward's Penview Hotel shoplot, live on 2026-09-13, after the repeated
+// remarks were fixed: the repair took the duplicated bullets out of "Why Buy
+// This Property?" and left the heading standing alone between two dividers —
+// even though the finding it was handed said to remove it. A section with a
+// title and no content is wrong in every agent's format, so this is decided by
+// structure, not asked of a model.
+//
+// Deliberately narrow, because a mistake here deletes a fact. A block between
+// two dividers is removed only when its ONE line is a recognisable section
+// heading AND carries no digit. "💰 RM2,500/month" alone between two rules is a
+// fact in somebody's style and is never touched.
+const SECTION_HEADING = /^[^\p{L}\p{N}]*(why\s+(buy|rent|invest)[\w\s]*\??|property\s+details|investment\s+highlights|highlights|rental\s+terms|sale\s+terms|buyer\s+benefits|ideal\s+for|remarks|features|facilities|deposit\s*(&|and)\s*terms|commission|location\s+highlights|kenapa\s+\w+[\w\s]*\??|为什么[^\n]*)\s*:?\s*$/iu
+
+export function dropEmptySections(text) {
+  const lines = String(text || '').split('\n')
+  const isRule = (l) => RULE_LINE.test(l) && /[━─═—–_=~\-]/.test(l)
+  const ruleAt = lines.map((l, i) => (isRule(l) ? i : -1)).filter((i) => i >= 0)
+  const drop = new Set()
+  for (let r = 0; r + 1 < ruleAt.length; r++) {
+    const from = ruleAt[r], to = ruleAt[r + 1]
+    const content = []
+    for (let i = from + 1; i < to; i++) if (lines[i].trim()) content.push(i)
+    if (content.length !== 1) continue
+    const line = lines[content[0]].trim()
+    if (/\d/.test(line) || !SECTION_HEADING.test(line)) continue
+    // the heading, the blank lines around it, and ONE of the two rules
+    for (let i = from + 1; i <= to; i++) drop.add(i)
+  }
+  if (!drop.size) return text
+  return lines.filter((_, i) => !drop.has(i)).join('\n')
+}

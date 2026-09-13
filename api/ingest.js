@@ -16,7 +16,7 @@
 
 import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions, fixWaLinks } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildRepairPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
-import { formatLost } from './_lib/format.js'
+import { formatLost, dropEmptySections } from './_lib/format.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
 import { renderBrandCard } from './_lib/brandcard.js'
@@ -60,6 +60,10 @@ async function parseText(text, status) {
   if (!status.configured) return demoParse(text)
   try { return extractJson(await runModel(buildParsePrompt(text))) } catch { return demoParse(text) }
 }
+
+// What publishes is what gets checked: the agent's own WhatsApp number made
+// dialable, and no section heading left standing with nothing under it.
+const finish = (text, listing) => dropEmptySections(fixWaLinks(text, listing))
 
 // Which model answered, from a runModel trace array.
 const answeredBy = (t) => {
@@ -116,7 +120,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
   // nothing (Edward's caption carried wa.me/0183929100). The number is theirs,
   // so only its format is wrong — corrected here, before the contract check, so
   // what is checked is what publishes. See fixWaLinks in postguard.js.
-  let caption = fixWaLinks(parts.join('\n\n• • •\n\n'), listing)
+  let caption = finish(parts.join('\n\n• • •\n\n'), listing)
 
   // THE CAPTION CONTRACT. On 2026-09-02 "Fully Furnished" was published about a
   // unit whose listing never mentioned furnishing, while the listing's own hook
@@ -169,7 +173,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
         const repaired = extractJson(await runModel(buildRepairPrompt(listing, previous, problems, rules), t))
         const rparts = langs.map((l) => repaired?.facebook_page?.[l]).filter(Boolean)
         if (rparts.length) {
-          const rcap = fixWaLinks(rparts.join('\n\n• • •\n\n'), listing)
+          const rcap = finish(rparts.join('\n\n• • •\n\n'), listing)
           const rvv = captionViolations(rcap, listing)
           const rrules = ruleViolations(rcap, rules, 'facebook_page')
           const rph = inventsPriceHistory(rcap, listing)
@@ -181,7 +185,7 @@ async function writeCaption(listing, languages, status, styleGuide, contact, rul
           const lost = formatLost(caption, rcap)
           const accepted = after < before && (!lost || wouldRefuse(v, ph))
           trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), findings: `${before} → ${after}`, ...(lost ? { formatLost: lost } : {}), accepted })
-          if (accepted) { caption = fixWaLinks(rcap, listing); content = repaired; v = rvv; rv = rrules; ph = rph }
+          if (accepted) { caption = rcap; content = repaired; v = rvv; rv = rrules; ph = rph }
         } else trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: 'no caption in the reply' })
       } catch (e) {
         trace.push({ step: `repair ${attempt + 1}`, by: answeredBy(t), accepted: false, failed: String(e?.message || e).slice(0, 160) })
