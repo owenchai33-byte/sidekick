@@ -1476,18 +1476,49 @@ export function captionViolations(caption, listing) {
 // digits) count, so short template lines — "2 Bedrooms", a divider, a hashtag —
 // can never trip it. Marketing, not invented: it drives the repair round, which
 // edits in place, and never blocks a post.
+//
+// WORDS, NOT LINES. The first version compared whole lines, and the very next
+// live run walked straight past it: the model joined both remarks into ONE
+// all-caps highlight ("✨ SNP AND MOT LEGAL FEE & STAMP DUTY … • MOC, VALUATION
+// BORNE BY PURCHASER") and repeated them again as bullets. No line matched a
+// line; the facts still appeared twice. So a line counts as a repeat when at
+// most of its words already appear in another line of the same caption.
+//
+// AND NOT EVERY RESTATEMENT. Measured over the 19 real captions in the chat
+// history: a 4-word threshold flagged 7, and 6 of them were the house style —
+// "Why Buy / Why Rent" restating a short detail ("✅ 2 Bedrooms, 2 Bathrooms",
+// "✅ Built-up 787 sqft", "✅ Current Rental: RM1,300/month"). Owen's own trained
+// examples do exactly that, and a repair that strips those bullets would take
+// away a format he likes. What set Edward's apart was LENGTH: a whole sentence
+// of remarks printed twice. So two rules, counting only words with no digit in
+// them (a figure is what a style restatement usually repeats):
+//   exact   the same line twice, 4+ words      — "MOC, Valuation borne by purchaser"
+//   folded  a 7+ word line, 90% inside another — the remarks inside the ✨ line
+// Over that corpus this flags one caption: Edward's.
+const REPEAT_STOP = new Set(['and', 'the', 'a', 'an', 'of', 'to', 'for', 'in', 'on', 'by', 'with', 'is', 'are', 'at', 'or', 'dan', 'yang', 'untuk', 'di'])
+const repeatWords = (s) => String(s).toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u)
+  .filter((w) => w && !REPEAT_STOP.has(w) && !/\d/.test(w))
+
 export function repeatedLines(caption) {
   const out = []
   for (const part of String(caption || '').split(/\n\s*•\s*•\s*•\s*\n/)) {
-    const seen = new Map()
-    for (const raw of part.split('\n')) {
-      const key = raw.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-      if (key.length < 20) continue
-      if (!seen.has(key)) seen.set(key, { line: raw.trim(), n: 0 })
-      seen.get(key).n++
-    }
-    for (const { line, n } of seen.values()) {
-      if (n > 1) out.push(`"${line.slice(0, 90)}" appears ${n} times — say it once, in the section it belongs to, and remove any heading that is left with nothing under it`)
+    const lines = part.split('\n').map((raw) => ({ raw: raw.trim(), words: repeatWords(raw), key: raw.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }))
+      .filter((l) => l.words.length >= 4)
+    const reported = new Set()
+    for (let i = 0; i < lines.length; i++) {
+      for (let j = 0; j < lines.length; j++) {
+        if (i === j || reported.has(i)) continue
+        const a = lines[i], b = lines[j]
+        // `a` is the fact, `b` the line that already says it: the shorter one is
+        // the repeat, and of two equal lines only the later is reported.
+        if (a.words.length > b.words.length || (a.words.length === b.words.length && i < j)) continue
+        const exact = a.key === b.key
+        const inB = new Set(b.words)
+        const folded = a.words.length >= 7 && a.words.filter((w) => inB.has(w)).length / a.words.length >= 0.9
+        if (!exact && !folded) continue
+        reported.add(i)
+        out.push(`"${a.raw.slice(0, 80)}" is already said in "${b.raw.slice(0, 60)}" — say it once, in the section it belongs to, and remove any heading left with nothing under it`)
+      }
     }
   }
   return out

@@ -68,13 +68,13 @@ describe('a fact printed twice is caught', () => {
     const out = repeatedLines(CAPTION)
     expect(out).toHaveLength(2)
     expect(out[0]).toMatch(/SNP and MOT legal fee/)
-    expect(out[0]).toMatch(/appears 2 times/)
+    expect(out[0]).toMatch(/is already said in/)
     expect(out[1]).toMatch(/MOC, Valuation borne by purchaser/)
   })
 
   it('reaches the repair round, and never blocks the post', () => {
     const v = captionViolations(CAPTION, { rawText: LISTING, listingType: 'sale', price: 198000 })
-    expect(v.marketing.join(' ')).toMatch(/appears 2 times/)
+    expect(v.marketing.join(' ')).toMatch(/is already said in/)
     expect(v.invented).toEqual([])
   })
 
@@ -169,5 +169,65 @@ describe('a heading left with nothing under it is removed', () => {
   it('leaves a caption with no dividers exactly as it is', () => {
     const plain = 'Why Buy This Property?\nRM198,000\nPM me'
     expect(dropEmptySections(plain)).toBe(plain)
+  })
+})
+
+
+// The second live run, after the whole-line version shipped: both remarks joined
+// into one all-caps highlight line, then repeated as bullets. No line matched a
+// line, the check found nothing, and SNP and MOC were each printed twice.
+const LIVE_JOINED = `🏡 NEARBY PENVIEW HOTEL PENDING – FIRST FLOOR SHOPLOT FOR SALE
+
+✨ SNP AND MOT LEGAL FEE & STAMP DUTY HALF SHARED BETWEEN VENDOR AND PURCHASER • MOC, VALUATION BORNE BY PURCHASER
+
+━━━━━━━━━━━━━━━
+
+💰 Selling Price
+
+RM198,000
+
+━━━━━━━━━━━━━━━
+
+Property Details
+
+🏬 Commercial Shoplot
+
+📐 Built-up Area: 742.7 sqft
+
+📐 First Floor
+
+━━━━━━━━━━━━━━━
+
+Why Buy This Property?
+
+✅ SNP and MOT legal fee and stamp duty half shared between vendor and purchaser.
+
+✅ MOC, Valuation borne by purchaser.
+
+━━━━━━━━━━━━━━━
+
+📲 PM For More Information Or Viewing Arrangement
+
+#PCMY_Sale`
+
+describe('a fact repeated inside a longer line is still a repeat', () => {
+  it('catches the remarks folded into the ✨ highlight and repeated as bullets', () => {
+    const out = repeatedLines(LIVE_JOINED)
+    expect(out.length).toBeGreaterThanOrEqual(1)
+    expect(out.join(' ')).toMatch(/SNP and MOT legal fee/i)
+  })
+
+  it("does not flag Owen's normal highlight line against his detail lines", () => {
+    const renna = '✨ Fully Furnished | 12th Floor | 2 Bed 2 Bath\n\n🛏️ 2 Bedrooms\n\n🛁 2 Bathrooms\n\n🛋️ Fully Furnished\n\n🏢 Level: 12th Floor\n\n✅ Fully Furnished\n\n✅ 12th Floor Living'
+    expect(repeatedLines(renna)).toEqual([])
+  })
+})
+
+describe('the house style restating a short detail is not a repeat', () => {
+  // Measured over the 19 real captions in the chat history: this pattern is in
+  // six of them, and Owen's own trained examples do it.
+  it('leaves "Why Buy" bullets that restate a figure from the details', () => {
+    const style = 'Property Details\n\n📐 Built-up Area: 787 sqft\n\n📜 Current Rental: RM1,300/month\n\n━━━━━━━━━━━━━━━\n\nWhy Buy This Property?\n\n✅ Built-up 787 sqft\n\n✅ Current Rental: RM1,300/month\n\n✅ 2 Bedrooms, 2 Bathrooms'
+    expect(repeatedLines(style)).toEqual([])
   })
 })
