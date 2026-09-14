@@ -16,6 +16,7 @@
 
 import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions, fixWaLinks } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildRepairPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
+import { dropSpokenSize } from './_lib/spoken-size.js'
 import { formatLost, dropEmptySections } from './_lib/format.js'
 import { runModel, extractJson, providerStatus } from './_lib/providers.js'
 import { demoParse, demoContent } from '../shared/demo.js'
@@ -643,6 +644,9 @@ export default async function handler(req, res) {
         if (!retry.degraded && rv2.invented.length < rv.invented.length) rs = retry
       }
     }
+    // The floor area is on the reel's price bar for the whole video, so the voice
+    // does not also read it out — see spoken-size.js. The TikTok caption keeps it.
+    rs = { ...rs, script: dropSpokenSize(rs.script, listing) }
     // THE HOLD BODY, ASSEMBLED HERE. The reel caller used to build its own /api/hold
     // request out of this response, and it silently left two fields out of it:
     // captionDegraded (so hold.js defaulted it to false and the ✅ saw a clean

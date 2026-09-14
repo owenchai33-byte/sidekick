@@ -585,7 +585,7 @@ intonation on every voice tested.
   one: "Message Edward for a viewing!". No urgency ("before it's gone", "snapped
   up") — that is a claim about demand nobody made.
 - 30-50 words total. Write every figure the way the listing writes it — "RM2,800
-  a month", "RM498,000", "825 sq ft", "42 points", "2+1 deposit". Do NOT spell
+  a month", "RM498,000", "42 points", "2+1 deposit". Do NOT spell
   numbers out in words: the voice reads figures correctly, and every word also
   appears on screen as a subtitle, where "RM2,800" reads better than "RM two
   thousand eight hundred". No emojis, no hashtags, no markdown — it's read aloud.
