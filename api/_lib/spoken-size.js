@@ -27,7 +27,33 @@ const PHRASE = new RegExp(
   String.raw`(?:\s*,\s*|\s+and\s+|\s+with\s+|\s+)?`,
   'gi')
 // A sentence ending on one of these lost the thing it was saying.
-const DANGLING = /\b(?:is|are|it's|its|at|of|with|and|a|an|the|has|offers|measures|spans|about|around|over|just|only)\s*$/i
+const DANGLING = /\b(?:is|are|it['’]s|its|at|of|with|and|a|an|the|has|offers|measures|spans|about|around|over|just|only)\s*$/i
+
+// "It's 742.7 sq ft and <rest>" — the commonest shape, and the one plain removal
+// breaks: live 2026-09-14 it turned "It's 742.7 sq ft and the SNP… are split"
+// into "It's the SNP… are split". What follows the joint decides the repair.
+const SUBJECT_SIZE = new RegExp(
+  String.raw`^(it['’]s|it is|that['’]s|(?:this|the) (?:[\w-]+ ){0,2}is)\s+(?:(?:about|around|roughly|over|nearly|a|an|spacious|generous)\s+)*` +
+  String.raw`${NUM}\s*-?\s*${UNIT}(?:\s+(?:of\s+)?(?:floor\s+)?(?:space|built-?up(?:\s+area)?|area))?\s*(,|\band\b|\bwith\b)?\s*([\s\S]*)$`, 'i')
+// A new clause starts here: its own subject, so the size clause goes whole.
+const CLAUSE_START = new Set(['the', 'a', 'an', 'it', 'its', "it's", 'it’s', 'you', "you'll", 'you’ll', 'your', 'we', 'there', 'this', 'that', 'these', 'those', 'their', 'our', 'plus', 'and'])
+const VERB_S = new Set(['has', 'comes', 'sits', 'offers', 'includes', 'features', 'boasts', 'gives', 'gets', 'faces', 'looks'])
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/** Repair "<It's> <size> <joint> <rest>". null when the sentence is another shape. */
+function subjectRepair(body) {
+  const m = SUBJECT_SIZE.exec(body.trim())
+  if (!m) return null
+  const [, subject, joint = '', restRaw] = m
+  const rest = restRaw.trim()
+  if (!rest) return ''
+  const first = rest.split(/\s+/)[0].toLowerCase().replace(/[^a-z'’]/g, '')
+  const bare = /^(?:it['’]s|it is)$/i.test(subject) ? 'It' : /^that['’]s$/i.test(subject) ? 'That' : cap(subject.replace(/\s+is$/i, ''))
+  if (/^with$/i.test(joint)) return `${bare} comes with ${rest}`
+  if (CLAUSE_START.has(first)) return cap(rest.replace(/^and\s+/i, ''))
+  if (VERB_S.has(first)) return `${bare} ${rest}`
+  return `${cap(subject)} ${rest}`
+}
 
 /** True when the spoken script states a floor area the price bar already shows. */
 export function saysSize(script, listing) {
@@ -47,6 +73,12 @@ export function dropSpokenSize(script, listing) {
   const kept = []
   for (const sentence of sentences) {
     if (!SIZE.test(sentence)) { kept.push(sentence.trim()); continue }
+    const stop = (sentence.match(/[.!?]+\s*$/) || [''])[0].trim()
+    const repaired = subjectRepair(sentence.replace(/[.!?]+\s*$/, ''))
+    if (repaired !== null) {
+      if (repaired.split(/\s+/).filter(Boolean).length >= 3 && !DANGLING.test(repaired)) kept.push(`${repaired}${stop || '.'}`)
+      continue
+    }
     let t = sentence.replace(PHRASE, ' ')
     const end = (t.match(/[.!?]+\s*$/) || [''])[0].trim()
     let body = t.replace(/[.!?]+\s*$/, '')
@@ -61,4 +93,22 @@ export function dropSpokenSize(script, listing) {
   const out = kept.join(' ').trim()
   // Never an empty voiceover: a script that was nothing but the size keeps it.
   return out || s
+}
+
+/**
+ * The listing as the reel writer should read it: every floor area taken out, and
+ * a line left holding only its label ("Built-up:") dropped. What the model never
+ * reads, it cannot say.
+ */
+export function withoutSize(text) {
+  const size = new RegExp(String.raw`\b${NUM}\s*-?\s*${UNIT}(?:\s+(?:of\s+)?(?:floor\s+)?(?:space|built-?up(?:\s+area)?|area))?`, 'gi')
+  const out = []
+  for (const line of String(text || '').split('\n')) {
+    if (!line.match(size)) { out.push(line); continue }
+    const t = line.replace(size, '').replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').replace(/[\s,;|•·]+$/, '').trim()
+    // Nothing left, or only the label that introduced the size ("Built-up Area:").
+    if (!t || /^[^\p{L}\p{N}]*$/u.test(t) || (/[:：]$/.test(t) && t.split(/\s+/).length <= 4)) continue
+    out.push(t)
+  }
+  return out.join('\n')
 }

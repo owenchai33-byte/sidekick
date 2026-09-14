@@ -646,7 +646,9 @@ export default async function handler(req, res) {
     }
     // The floor area is on the reel's price bar for the whole video, so the voice
     // does not also read it out — see spoken-size.js. The TikTok caption keeps it.
+    const spokenBefore = rs.script
     rs = { ...rs, script: dropSpokenSize(rs.script, listing) }
+    const sizeRemovedFromScript = rs.script !== spokenBefore
     // THE HOLD BODY, ASSEMBLED HERE. The reel caller used to build its own /api/hold
     // request out of this response, and it silently left two fields out of it:
     // captionDegraded (so hold.js defaulted it to false and the ✅ saw a clean
@@ -679,6 +681,8 @@ export default async function handler(req, res) {
     }
     return send(res, 200, {
       ok: true, mode: 'reel', script: rs.script, caption: rs.caption,
+      // Whether the backstop had to act — how often the model still says the size.
+      ...(sizeRemovedFromScript ? { sizeRemovedFromScript: true } : {}),
       captionDegraded: !!rs.degraded,
       ...(rs.degraded ? {
         captionDegradedReason: rs.reason,

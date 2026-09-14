@@ -2,6 +2,7 @@
 // and generating per-platform × per-language copy. Both instruct the model to
 // return raw JSON only. Files prefixed `_` are not treated as routes by Vercel.
 
+import { withoutSize } from './spoken-size.js'
 import { resolvePropertyName, bannedWord, waLinkFor } from './postguard.js'
 
 import { PLATFORM_MAP, LANGUAGE_MAP } from '../../shared/constants.js'
@@ -552,9 +553,13 @@ export function buildReelPrompt(listing, styleGuide, rules) {
     listing.propertyType && propertyTypeStated(listing) && `Type: ${listing.propertyType}`,
     listing.bedrooms != null && `${listing.bedrooms} bedrooms`,
     listing.bathrooms != null && `${listing.bathrooms} bathrooms`,
-    listing.sqft != null && `${listing.sqft} sq ft`,
+    // The floor area is on the reel's price bar for the whole video. Given plainly,
+    // the model read it aloud even when told not to (Edward's Penview reel,
+    // 2026-09-14), so it is labelled for the caption and taken out of the
+    // listing text the script is written from. spoken-size.js is the backstop.
+    listing.sqft != null && `Floor area: ${listing.sqft} sq ft — for the CAPTION only. It is on screen for the whole video; the SCRIPT never says it.`,
     waLinkFor(listing) && `WhatsApp link (use EXACTLY this if a link is wanted; never build one from the local number): ${waLinkFor(listing)}`,
-    listing.rawText && `Agent's message: ${String(listing.rawText).slice(0, 500)}`,
+    listing.rawText && `Agent's message: ${String(listing.sqft != null ? withoutSize(listing.rawText) : listing.rawText).slice(0, 500)}`,
   ].filter(Boolean).join('\n')
 
   return `Write a TikTok reel for this property. Return ONLY JSON: { "script": "...", "caption": "..." }

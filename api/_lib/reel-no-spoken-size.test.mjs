@@ -62,6 +62,15 @@ describe('the reel voice does not read the size the price bar shows', () => {
     expect(out.listing.sqft).toBe(742.7)
   })
 
+  it('the reel writer is told the size is caption-only and never reads it in the listing', async () => {
+    await reel({ price: 198000, sqft: 742.7, listingType: 'sale', location: 'Penview Hotel', propertyType: 'shoplot', rawText: PENVIEW })
+    const prompt = providers.runModel.mock.calls.map((c) => c[0]).find((p) => /Write a TikTok reel/.test(p))
+    expect(prompt).toMatch(/Floor area: 742\.7 sq ft — for the CAPTION only/)
+    const message = prompt.slice(prompt.indexOf("Agent's message:"))
+    expect(message).toMatch(/Rm198,000/)
+    expect(message).not.toMatch(/742\.7/)
+  })
+
   it('leaves the voice alone when the bar has no size to show', async () => {
     const out = await reel({ price: 198000, sqft: null, listingType: 'sale', location: 'Penview Hotel', propertyType: 'shoplot', rawText: PENVIEW })
     expect(out.script).toBe(SCRIPT)
