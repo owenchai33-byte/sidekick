@@ -277,13 +277,20 @@ function geoTags(loc) {
 }
 
 async function reelScript(listing, status, styleGuide, rules) {
+  // WHY the writer failed, kept. This catch used to be empty, so on Edward's
+  // 2026-09-15 12:08 build the only record of the failure was "the reel writer
+  // failed" — no way to tell a rate limit from a bad answer. It rides back to
+  // the Mac (which retries only a writer failure) and into the function log.
+  let writerError = null
   if (status.configured) {
     try {
       const j = extractJson(await runModel(buildReelPrompt(listing, styleGuide, rules)))
       // The TikTok caption is where the dead link actually reached a client:
       // Edward's read "WhatsApp: https://wa.me/0183929100" on 2026-09-12.
       if (j && j.script) return { script: String(j.script), caption: fixWaLinks(String(j.caption || ''), listing), degraded: false }
-    } catch { /* fall through */ }
+      writerError = 'the model answered without a script'
+    } catch (e) { writerError = String(e?.message || e).slice(0, 300) }
+    console.log('[ingest] reel writer failed', JSON.stringify({ writerError }))
   }
   const money = listing.price != null ? `RM${Number(listing.price).toLocaleString('en-MY')}${listing.listingType === 'rental' ? ' a month' : ''}` : ''
   // NO SUBSTITUTE LOCATION. This used to fall back to 'Kuching', which put a town
@@ -298,6 +305,8 @@ async function reelScript(listing, status, styleGuide, rules) {
     script,
     caption: `${listing.propertyType || 'Property'}${loc ? ` in ${loc}` : ''} ${money ? '— ' + money : ''} 🏡 ${geoTags(loc)}`,
     degraded: true,
+    writerFailed: !!status.configured,
+    ...(writerError ? { writerError } : {}),
     reason: status.configured
       ? 'the reel writer failed — this is the deterministic template script, not this agent\'s voice'
       : 'no AI provider configured — this is the deterministic template script, not this agent\'s voice',
@@ -686,6 +695,10 @@ export default async function handler(req, res) {
       captionDegraded: !!rs.degraded,
       ...(rs.degraded ? {
         captionDegradedReason: rs.reason,
+        // A writer failure (rate limit, outage, unusable answer) is worth one more
+        // try; a content refusal is not. The Mac decides on this flag, not on text.
+        ...(rs.writerFailed ? { writerFailed: true } : {}),
+        ...(rs.writerError ? { writerError: rs.writerError } : {}),
         captionWarning: `the reel writer failed — this is generic template copy, NOT this agent's voice. Do not publish it; POST the holdBody below to /api/hold and the ✅ will refuse it.`,
       } : {}),
       holdBody,
@@ -875,6 +888,9 @@ export default async function handler(req, res) {
       ...settingsReport,
       ...(captionWarnings.length ? { captionWarnings } : {}),
       ...(captionDegraded ? { captionDegradedReason } : {}),
+      // The writer failing (not the caption being refused) is the one case a
+      // retry can fix; the Mac keys its one retry on this flag.
+      ...(captionDegraded && !captionDegradedReason && captionEngineError && status.configured ? { writerFailed: true, captionEngineError } : {}),
       // Same two causes as the AUTO branch above — say which one it was.
       ...(captionDegraded ? { captionWarning: captionDegradedReason
         ? `✅ will refuse this: ${captionDegradedReason}. This is the agent's real caption and the engine is fine, so re-sending will not change it — fix the caption or the listing text.`
