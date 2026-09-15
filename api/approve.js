@@ -12,7 +12,8 @@
 import { getPending, delPending, claimPending, releasePending } from './_lib/pending.js'
 import { appendFeed } from './_lib/feed.js'
 import { postToConnected } from './_lib/social.js'
-import { captionViolations, nonMoneyInventions } from './_lib/postguard.js'
+import { captionViolations, nonMoneyInventions, contactNumbersFromRules } from './_lib/postguard.js'
+import { getRules } from './_lib/style.js'
 import { ownershipVerdict } from './_lib/tenant.js'
 
 function send(res, status, payload) {
@@ -86,7 +87,7 @@ function readJson(req) {
 // the write path (ingest.js) and the publish path cannot drift apart again —
 // they had, and the same caption approve.js would happily publish was marked
 // degraded by ingest.js first.
-function inventedFacts(item) {
+function inventedFacts(item, taughtContacts = []) {
   const src = item?.source
   const text = typeof src?.text === 'string' ? src.text.trim() : ''
   // NO SOURCE, NO CHECK. The ~14 pendings already held predate this field, and
@@ -96,7 +97,8 @@ function inventedFacts(item) {
   // refusal this guard exists to prevent, wearing a different costume.
   if (!text) return []
   try {
-    return nonMoneyInventions(captionViolations(item.caption, { ...src, rawText: text }).invented)
+    const contactLinks = [...new Set([...(Array.isArray(src.contactLinks) ? src.contactLinks : []), ...taughtContacts])]
+    return nonMoneyInventions(captionViolations(item.caption, { ...src, rawText: text, ...(contactLinks.length ? { contactLinks } : {}) }).invented)
   } catch {
     // A guard that throws must not refuse the post. Failing closed here would
     // take out every publish at once with no error anyone ever sees, which is
@@ -299,7 +301,14 @@ export default async function handler(req, res) {
   // Same refusal, one step further out: not "the writer told us it failed" but
   // "the caption says something the listing does not". Runs BEFORE the claim, so
   // a refused post is left pending exactly as it was and the same id retries.
-  const invented = inventedFacts(item)
+  // The agent's WhatsApp link, taught as a rule, is theirs at the tick too — and
+  // read from the rules as they are NOW, so a post held before the rule was
+  // grounded (Edward's Stapok reel, 2026-09-15 12:25, three minutes before the
+  // write-side fix shipped) is not refused for carrying his own link. A rules
+  // read that fails grounds nothing, which is exactly the check as it was.
+  let taughtContacts = []
+  try { taughtContacts = contactNumbersFromRules((await getRules(item.profileId)).rules) } catch { taughtContacts = [] }
+  const invented = inventedFacts(item, taughtContacts)
   if (invented.length && !forced) {
     return send(res, 409, {
       ok: false, id, blocked: 'captionInvented', invented,
