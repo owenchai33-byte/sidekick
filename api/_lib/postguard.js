@@ -1169,6 +1169,27 @@ export function transactionTypeConflicts(caption, listing) {
 // Facebook ad that carries the rent and leaves these out is normal copy.
 const ANCILLARY_MONEY = /deposit|utilit|service\s*charge|maintenance|booking|earnest|cagaran|wang\s*pendahuluan|caj\s*perkhidmatan|押金|訂金|订金|定金|管理费|管理費|杂费|雜費|服务费|服務費/i
 
+// THE AGENT'S OWN CONTACT, TAUGHT ONCE. Edward, 2026-09-15: "Please add on my
+// WhatsApp link https://wa.me/60183929100". It was saved as a rule, so every
+// caption after it carried the link — and every one was refused as "invented",
+// because the check below only looked in the listing, and a listing rarely
+// repeats the agent's own number. A rule is the agent's own words, saved on
+// purpose, so a WhatsApp link or phone number written IN a rule grounds the
+// same number in a caption. Only contact numbers: a price or size in a rule
+// grounds nothing.
+const RULE_CONTACT = /(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=)\+?(\d{9,13})|(?:^|[^\d])(\+?6?0?1\d[-\s]?\d{3,4}[-\s]?\d{4})(?!\d)/g
+/** Digits of every WhatsApp link or Malaysian mobile number written in the agent's rules. */
+export function contactNumbersFromRules(rules) {
+  const out = new Set()
+  for (const r of Array.isArray(rules) ? rules : []) {
+    for (const m of String(r || '').matchAll(RULE_CONTACT)) {
+      const d = String(m[1] || m[2] || '').replace(/\D/g, '')
+      if (d.length >= 9) out.add(d.replace(/^60/, '').replace(/^0/, ''))
+    }
+  }
+  return [...out]
+}
+
 export function captionViolations(caption, listing) {
   const cap = String(caption || '')
   const capLow = cap.toLowerCase()
@@ -1426,7 +1447,9 @@ export function captionViolations(caption, listing) {
     // carries no phone number at all, so a digits-only rule called every one of
     // them invented and refused the agent's real contact line.
     const pastedByAgent = raw.length > 0 && srcLow.includes(raw.toLowerCase())
-    const grounded = pastedByAgent || (digits.length >= 7 && (() => {
+    const taught = digits.length >= 9 && (Array.isArray(listing?.contactLinks) ? listing.contactLinks : [])
+      .some((n) => String(n).replace(/\D/g, '') === digits.replace(/^60/, '').replace(/^0/, ''))
+    const grounded = pastedByAgent || taught || (digits.length >= 7 && (() => {
       const srcDigits = String(known).replace(/\D/g, '')
       const bare = digits.replace(/^60/, '')
       return srcDigits.includes(digits) || srcDigits.includes(bare)

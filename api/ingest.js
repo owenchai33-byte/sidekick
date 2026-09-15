@@ -14,7 +14,7 @@
 // SECURITY: gated by INGEST_SECRET (header `x-ingest-secret` or ?secret=).
 // With no secret configured it refuses to run. GET = readiness check.
 
-import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions, fixWaLinks } from './_lib/postguard.js'
+import { inventsPriceHistory, captionViolations, ruleViolations, nonMoneyInventions, fixWaLinks, contactNumbersFromRules } from './_lib/postguard.js'
 import { buildParsePrompt, buildContentPrompt, buildRepairPrompt, buildReelPrompt, propertyTypeStated } from './_lib/prompts.js'
 import { dropSpokenSize } from './_lib/spoken-size.js'
 import { formatLost, dropEmptySections } from './_lib/format.js'
@@ -633,6 +633,7 @@ export default async function handler(req, res) {
     const cardP = withBrandCard(media.slice(0, 1), listing, brand, true)
     const [reelStyle, reelRulesRes] = await Promise.all([styleP, rulesP])
     const reelRules = reelRulesRes.rules
+    { const taught = contactNumbersFromRules(reelRules); if (taught.length) listing.contactLinks = taught }
     let rs = await reelScript(listing, status, reelStyle, reelRules)
     // The spoken script and the TikTok caption publish under the agent's name
     // too, so they answer to the same contract as the Facebook caption. A reel
@@ -685,6 +686,7 @@ export default async function handler(req, res) {
       // at the ✅ instead of trusting a flag. hold.js takes `sourceText`/`rawText`
       // and deliberately not a bare `text`.
       sourceText: listing.rawText || text || '',
+      ...(listing.contactLinks ? { contactLinks: listing.contactLinks } : {}),
       price: listing.price ?? null, location: listing.location || null,
       listingType: listing.listingType,
     }
@@ -713,6 +715,8 @@ export default async function handler(req, res) {
 
   const rulesRes = await rulesP
   const agentRules = rulesRes.rules
+  // A WhatsApp link the agent taught as a rule is theirs — see postguard.js.
+  { const taught = contactNumbersFromRules(agentRules); if (taught.length) listing.contactLinks = taught }
   // Report whether a trained style was actually found. A missing style does not
   // error — it silently produces generic copy, which is exactly how an orphaned
   // style went unnoticed after a provider switch. Surface it so the agent can say so.

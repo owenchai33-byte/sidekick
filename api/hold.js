@@ -50,7 +50,7 @@ import { putPending } from './_lib/pending.js'
 // of them and is not stored twice; neither are the photos, the card or the
 // media list, which are already on the record and are not text.
 const SOURCE_FIELDS = ['propertyName', 'location', 'title', 'price', 'sqft', 'landSqft',
-  'bedrooms', 'bathrooms', 'listingType', 'furnishing', 'tenure']
+  'bedrooms', 'bathrooms', 'listingType', 'furnishing', 'tenure', 'contactLinks']
 
 // Far longer than any WhatsApp listing this has ever been sent. Past the cap the
 // source is DROPPED, never truncated: a cut-off source is missing money figures
@@ -71,7 +71,7 @@ const MIN_SOURCE = 25
 
 // Fields the caller has always sent flat, alongside `listing`. Used only when
 // the parsed listing does not carry them.
-const FLAT_FALLBACK = { price: 'price', location: 'location', listingType: 'listingType' }
+const FLAT_FALLBACK = { price: 'price', location: 'location', listingType: 'listingType', contactLinks: 'contactLinks' }
 
 /** The listing text + parsed fields to re-check this caption against, or null. */
 export function sourceFrom(body) {
@@ -100,6 +100,12 @@ export function sourceFrom(body) {
     const v = parsed[k] ?? (k in FLAT_FALLBACK ? body?.[FLAT_FALLBACK[k]] : undefined)
     // null/'' is the parser saying "absent", and captionViolations is already
     // silent on an absent field, so storing it would only make the record bigger.
+    if (k === 'contactLinks') {
+      // Digits only, a handful at most: this grounds a contact link at the tick.
+      const list = Array.isArray(v) ? v.map((n) => String(n).replace(/\D/g, '')).filter((n) => n.length >= 9 && n.length <= 13).slice(0, 5) : []
+      if (list.length) source[k] = list
+      continue
+    }
     if (v !== undefined && v !== null && v !== '') source[k] = v
   }
   return source
